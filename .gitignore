@@ -1,0 +1,11 @@
+node_modules/
+bin/
+obj/
+dist/
+build/
+.env
+*.local
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
