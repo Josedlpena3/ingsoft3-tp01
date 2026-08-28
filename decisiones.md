@@ -181,3 +181,142 @@ el historial completo, en vez de desde el remoto incompleto. El commit entra as�
 semestre con su fecha y su autoría originales. La lección que me llevo es que "commiteado" y
 "entregado" no son lo mismo, y que la única verificación que vale es abrir el repositorio en el
 navegador — es la misma idea que el TP3 aplica al Project (probarlo en una ventana de incógnito).
+
+---
+
+## TP3 — Planificación y trazabilidad
+
+Tablero: <https://github.com/users/Josedlpena3/projects/1> (público)
+
+### 1. Duración del sprint: 1 semana
+
+La elegí para que **espeje la cadencia real de la materia**: hay una clase por semana y un TP por
+clase, así que el ciclo de trabajo ya es semanal aunque yo no lo declare. Un sprint de dos semanas
+me obligaría a planificar contra un calendario que no es el que realmente rige — el sprint
+terminaría a mitad de un TP y la revisión no coincidiría con ninguna entrega.
+
+Lo que gano con que coincidan: al cerrar el sprint, lo que hay para mostrar es exactamente lo que
+tengo que entregar. Lo que pierdo: casi nada de margen si me atraso, porque no hay una segunda
+semana adentro del mismo sprint para recuperar.
+
+### 2. Límite de trabajo en progreso: 2
+
+La regla de arranque es **cantidad de personas + 1**. Trabajo solo, así que dos.
+
+El "+1" no es decoración: es la válvula para cuando algo queda **esperando algo que no depende de
+mí** —una corrida de CI de varios minutos, una revisión, una respuesta— y necesito avanzar en otra
+cosa sin dejar la primera a medias. Con el límite en 1 me quedaría mirando el pipeline; con el
+límite en 5 dejaría de limitar y volvería al problema que el WIP existe para evitar: empezar mucho
+y terminar poco. El trabajo empezado y no terminado no es productividad, es **inventario**, y el
+inventario cuesta — más cambio de contexto, más ramas viejas, más conflictos al integrar.
+
+**Qué me haría subirlo**: sumar una persona al equipo (pasaría a 3). **Qué señal me diría que quedó
+demasiado alto**: no alcanzarlo nunca. Si el contador jamás se pone en rojo, el límite no me está
+diciendo nada — no está haciendo de freno, es un número decorativo.
+
+Vale aclarar algo que se presta a confusión: el límite es un **acuerdo del equipo**, no un candado
+de la herramienta. GitHub pone el contador de la columna en rojo cuando lo pasás, pero te deja
+pasar igual.
+
+### 3. Diagnóstico de la historia mal escrita
+
+La historia del ejercicio: *"Como desarrollador quiero crear la tabla usuarios para guardar los
+datos"*.
+
+**Por qué está mal**: es una **tarea disfrazada de historia**. El rol es el propio equipo, no
+alguien a quien el sistema le sirva para algo — nadie "quiere" una tabla, la tabla es un medio. El
+"para" no expresa un beneficio observable por nadie, sólo repite el qué con otras palabras. Y no es
+verificable: no hay forma de comprobar que "guardar los datos" esté bien hecho sin inventar los
+criterios que la historia no da. De INVEST viola **Valiosa** (nadie fuera del equipo la quiere) y
+**Testeable** (no se puede demostrar terminada).
+
+**Cómo la reescribiría**: *"Como usuario registrado quiero que mis datos sigan estando cuando vuelvo
+a entrar, para no tener que cargarlos de nuevo cada vez"*, con criterios verificables (los datos
+sobreviven a un reinicio del sistema; un usuario ve sólo los suyos). "Crear la tabla usuarios" no
+desaparece: baja a ser una **tarea** dentro de esa historia, que es el nivel donde siempre
+perteneció.
+
+### 4. Por qué el bug va al costado y no colgando de la historia
+
+La jerarquía cuenta **lo que planifiqué construir**: la épica es el objetivo, las historias el valor
+a entregar, las tareas los pasos. Un bug es un defecto de algo **ya construido** — no era parte del
+plan, así que no forma parte del árbol. Colgarlo de la historia que lo originó tiene además un
+efecto feo: esa historia ya está cerrada, y su barra de progreso pasaría a mentir.
+
+La distinción que importa es **cuándo aparece el defecto**:
+
+| Cuándo | Qué es | Dónde va |
+|---|---|---|
+| Con la historia **en curso**, antes de cerrarla | No es un bug: la historia todavía no cumple sus criterios | Se arregla dentro de la historia, sin issue aparte |
+| Sobre algo **ya entregado** | Bug de verdad | Issue propio con label `bug`, al costado |
+
+El principio detrás de las dos filas es uno solo: **una historia con defectos no está terminada**.
+Si lo encontré antes de cerrarla, no descubrí un bug — descubrí que me faltaba trabajo.
+
+El bug que cargué (#11) es del segundo caso y es real de mi app: el frontend pide `GET
+/api/tutorials` al montar el componente, pero el `depends_on` del frontend no espera al healthcheck
+del backend. Si abrís la página apenas levanta el stack, ves una lista vacía que se confunde con
+"no hay datos", porque el `.catch` del axios sólo hace `console.log` y el error nunca llega a la
+interfaz.
+
+### 5. Por qué cada criterio de aceptación de la historia es verificable
+
+Es lo que separa un criterio de una intención. "Que el CI funcione bien" no es criterio: no hay
+forma de pararse frente a la pantalla y decir si se cumple o no. Los cuatro que puse sí:
+
+| Criterio | Cómo lo verifico |
+|---|---|
+| El workflow corre en cada PR a main | Abro un PR y miro la pestaña *Actions*: o hay una corrida asociada, o no la hay |
+| Un test que falla bloquea el merge | Rompo algo a propósito y miro si el botón de merge queda deshabilitado (es la demostración del TP4) |
+| El reporte de tests queda publicado como artefacto | Entro a la corrida y miro si el artefacto está para descargar |
+| Badge de estado visible en el README | Abro el README y el badge está, o no está |
+
+Los cuatro se contestan con sí o no mirando un lugar concreto. Ninguno depende de mi opinión.
+
+### 6. Problemas encontrados y cómo los resolví
+
+- **El Project creado por comando nace privado y con el tablero vacío.** `gh project create` no
+  elige ningún repositorio, así que no queda configurado el workflow *Auto-add to project* que sí
+  arma la creación por web. Resultado: los issues no entran solos. Lo resolví agregándolos con
+  `gh project item-add`, y cambiando la visibilidad con
+  `gh project edit 1 --owner "@me" --visibility PUBLIC`.
+- **La visibilidad no la di por buena mirando la configuración.** El entregable es la URL, y un
+  Project privado da 404 —no "no tenés permiso": "no existe"—, así que lo verifiqué pidiendo la URL
+  **sin credenciales** y confirmando que devuelve HTTP 200. Es el equivalente a la ventana de
+  incógnito.
+- **`gh` necesita el scope `project`, que no viene de fábrica.** Sin él, cualquier `gh project`
+  contesta un error de permisos. Se agrega al autenticar: `--scopes "project,workflow"` (el
+  `workflow` hace falta aparte para poder pushear archivos dentro de `.github/workflows/`).
+- **Tres `gh auth login` abiertos a la vez.** Al no completar el primer intento lo volví a correr, y
+  terminé con tres procesos vivos. Cada uno genera **un código de un solo uso distinto**, así que la
+  página del navegador correspondía a un código y la terminal mostraba otro: autorizaba y no pasaba
+  nada. Lo detecté con `pgrep -fl "gh auth"` y porque `~/.config/gh/` no existía, o sea que el token
+  nunca se había escrito. Se resolvió con `pkill -f "gh auth login"` y un único intento limpio.
+- **El `Closes #N` va con el número de la TAREA, no el de la historia.** Un Pull Request implementa
+  una tarea concreta. Si hubiera puesto el número de la historia, la habría cerrado con la mitad del
+  trabajo sin hacer y la trazabilidad quedaría mintiendo. Por eso el PR #12 cierra la tarea #9, y la
+  historia #8 y la tarea #10 quedan **abiertas** — el trabajo sigue en el TP4 y el TP5.
+
+### 7. Declaración de uso de IA
+
+Este práctico se hizo **con un agente de IA (Claude, vía Claude Code) operando la terminal**, no
+sólo redactando. El reglamento (§6) es explícito en que la vara es la misma para la IA que opera que
+para la que escribe, así que lo declaro con ese detalle:
+
+**Qué hizo la IA**: instalar y configurar `gh`; crear los labels, los cinco issues y los enlaces de
+sub-issues; crear el Project y hacerlo público; abrir y mergear los Pull Requests; y redactar este
+documento.
+
+**Qué decidí yo**: la duración del sprint, el número del límite de trabajo en progreso, y qué app
+del semestre usar (eso venía del TP2).
+
+**Cómo lo verifiqué**: no dando por buena ninguna salida de comando. La jerarquía se comprobó
+consultando la API de GitHub y viendo el árbol épica → historia → dos tareas; el cierre automático
+del issue se comprobó pidiendo el timeline del issue #9 y confirmando que figura *cerrado por el PR
+#12*; la visibilidad del Project, con una petición sin credenciales que devolvió HTTP 200; y que la
+historia y la segunda tarea siguen abiertas, consultando su estado.
+
+**Lo que la IA encontró y yo no sabía**: que `evidencias.md` había entrado vacío a `main` en el TP1,
+que el tag `v1.0.0` apuntaba a un commit anterior a la documentación, y que el commit de
+documentación del TP2 nunca se había pusheado. Los tres están explicados arriba, en las secciones
+que corresponden.
