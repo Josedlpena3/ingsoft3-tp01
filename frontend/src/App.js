@@ -6,6 +6,7 @@ import "./App.css";
 import AddTutorial from "./components/AddTutorial";
 import Tutorial from "./components/Tutorial";
 import TutorialsList from "./components/TutorialsList";
+import Banner from "./components/Banner";   // <- este archivo NO existe: rompe el build a proposito
 
 function App() {
   return (
