@@ -1,5 +1,7 @@
 # ingsoft3-tp01 — Repo del semestre · Ingeniería de Software 3 (UCC 2026)
 
+[![CI](https://github.com/Josedlpena3/ingsoft3-tp01/actions/workflows/ci.yml/badge.svg)](https://github.com/Josedlpena3/ingsoft3-tp01/actions/workflows/ci.yml)
+
 Repositorio único de la cursada: arrancó como el TP1 (Git colaborativo) y desde el TP2 aloja
 además **la app del semestre**. Cada TP agrega una capa sobre el mismo artefacto.
 
