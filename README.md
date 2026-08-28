@@ -78,3 +78,5 @@ docker compose down -v   # borra también el volumen, y con él los datos
 ├── decisiones.md
 └── evidencias.md
 ```
+
+<!-- PR de relleno: existe para poder mostrar "Update branch" (strict: true) cuando se mergea otro PR -->
