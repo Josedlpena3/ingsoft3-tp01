@@ -161,6 +161,25 @@ El merge trajo conflictos en los cuatro archivos que existían en ambos repos (`
 `.gitignore`, `decisiones.md`, `evidencias.md`), resueltos combinando ambas versiones en vez de
 elegir una.
 
+#### Las evidencias del TP2 se regeneraron después de consolidar
+
+Las salidas de `evidencias.md` se habían capturado cuando el código vivía en `tienda-tp2`, así que
+mostraban contenedores llamados `tienda-tp2-backend-1`. Compose toma el nombre del proyecto de la
+carpeta, de modo que quien clone `ingsoft3-tp01` hoy ve `ingsoft3-tp01-backend-1`: la evidencia era
+cierta, pero ya no coincidía con lo que hay para mirar. Se regeneraron clonando el repositorio
+limpio desde GitHub y siguiendo el propio `README.md`.
+
+Aproveché para cubrir algo que faltaba: el enunciado pide la salida de `docker compose up -d`
+**desde cero**, y lo único evidenciado era el camino del registry (`docker-compose.registry.yml`),
+que descarga las imágenes en vez de construirlas. Ahora están los dos caminos.
+
+**Sobre los tags**: `v2.0.0` sigue apuntando al commit donde cerré el TP2, no a esta corrección
+posterior. No lo moví a propósito, y el motivo vale para todos: `decisiones.md` y `evidencias.md`
+son documentos **acumulativos** que crecen práctico a práctico sobre `main`. Ningún tag puede
+contener la versión final de un archivo que sigue creciendo — `v1.0.0` tampoco contiene las
+evidencias del TP2. Los tags congelan el estado del **código y la configuración** de cada práctico;
+la documentación completa y al día se lee siempre en `main`.
+
 #### El commit del TP2 que nunca había llegado a GitHub
 
 Al hacer el `git fetch` desde `https://github.com/Josedlpena3/tienda-tp2.git` aparecieron **dos**
