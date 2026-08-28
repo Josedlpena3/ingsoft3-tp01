@@ -320,3 +320,207 @@ historia y la segunda tarea siguen abiertas, consultando su estado.
 que el tag `v1.0.0` apuntaba a un commit anterior a la documentación, y que el commit de
 documentación del TP2 nunca se había pusheado. Los tres están explicados arriba, en las secciones
 que corresponden.
+
+---
+
+## TP4 — CI: Pipelines as Code
+
+### 1. Estructura del pipeline: dos jobs, en paralelo
+
+El workflow tiene **un job por imagen**: `build-backend` y `build-frontend`. No es una decisión
+estética — sale de cómo está partida la app, que tiene dos Dockerfiles porque son dos artefactos
+distintos que se despliegan por separado.
+
+**Por qué en paralelo y no en serie**: los dos jobs son independientes —construir el frontend no
+necesita nada del backend—, así que ponerlos en serie sólo sumaría los tiempos sin ganar nada.
+Medido en mi repo, primera corrida: backend 46s, frontend 77s. En paralelo el pipeline tarda lo que
+tarda el más lento (77s); en serie tardaría la suma (123s).
+
+Lo que hay que tener claro, y es pregunta de defensa: **dos jobs no comparten filesystem**. Cada uno
+corre en una máquina Ubuntu limpia y distinta que GitHub presta y destruye al terminar. Si el job B
+necesitara algo que produjo el job A, tendría que viajar como artefacto o declararse `needs: A`. Acá
+no hace falta porque no dependen entre sí.
+
+**Qué produce mi pipeline y dónde queda**: las dos imágenes nacen y mueren adentro del runner
+(`push: false`). No se guardan a propósito: el lugar de una imagen es un **registry**, no el almacén
+de artefactos, y publicarlas desde el pipeline es trabajo del TP7. La salida real de este pipeline
+es otra, y no es menor: **el check en verde que habilita el merge**.
+
+### 2. Los triggers, y por qué esos dos
+
+| Trigger | Para qué está |
+|---|---|
+| `pull_request` a `main` | **El que hace el trabajo**: corre ANTES del merge, sobre el resultado propuesto, y es el que alimenta el gate |
+| `push` a `main` | Le da a `main` una corrida propia — la que lee el badge — y deja el cache que después aprovecha cualquier PR nuevo |
+
+La diferencia de fondo: `pull_request` verifica lo que **quiere** integrarse; `push` deja constancia
+de cómo **quedó** `main` después del merge. Con el gate puesto, la de `push` rara vez sorprende: lo
+que iba a romper ya lo frenó la corrida del PR.
+
+### 3. Qué cachea, cuáles capas se reutilizan y cuáles no
+
+Lo que se cachea son **las capas de las imágenes**, y viajan al cache de GitHub Actions
+(`type=gha`) — no al Docker de mi máquina ni al del runner, que nace vacío en cada corrida. Cada
+job tiene su propio `scope` (`backend` / `frontend`).
+
+**El `scope` no es opcional y su ausencia no da error.** Sin él, los dos jobs usan el mismo estante
+por defecto y se pisan: el último en terminar deja su cache y borra el del otro. El síntoma parece
+azar — un job muestra `CACHED` y el otro no, y cuál cambia en cada corrida. En mi segunda corrida
+los **dos** reutilizaron a la vez (5 capas el backend, 7 el frontend), que es justamente la prueba
+de que cada uno tiene su estante.
+
+**Cuáles se reutilizan y cuáles no** — esto lo decide cómo está escrito el Dockerfile, no el
+workflow. Mi frontend tiene seis capas y el orden importa:
+
+```
+1 FROM node:16-alpine
+2 WORKDIR /usr/src/app
+3 COPY package.json package-lock.json* yarn.lock* ./
+4 RUN npm install          <- la cara: 28.7s
+5 COPY . .
+6 RUN npm run build
+```
+
+Las dependencias se copian y se instalan **antes** que el código. Por eso, cuando cambio un archivo
+de `src/`, las capas 1–4 se reutilizan y sólo se rehacen la 5 y la 6: `npm install` no se vuelve a
+correr porque `package.json` no cambió. Si el `COPY . .` estuviera antes del `npm install`,
+cualquier cambio de una línea de código invalidaría la instalación de dependencias entera.
+
+Un detalle que observé y vale la pena contar: cuando arreglé el build de la demostración, el fix
+dejó `App.js` **byte a byte igual** que en `main`, y volvieron a dar `CACHED` incluso el `COPY . .`
+y el `npm run build`. La clave del cache es el **contenido**, no el commit: si el contenido vuelve a
+ser el mismo, la capa vuelve a servir.
+
+### 4. Qué pasa si el cache desaparece
+
+**Nada, salvo que tarda más.** El cache es una optimización: la plataforma lo desaloja cuando quiere
+y tiene límite de tamaño, así que el pipeline tiene que funcionar exactamente igual sin él. Si
+*fallara* sin cache, no tendría un cache: tendría una **dependencia escondida**, y eso es un bug.
+
+Esto no lo digo de memoria: me pasó. La corrida de la rama `feature/demo-gate` arrancó a las
+20:26:04, y la corrida de `main` que iba a dejarle el cache todavía no había terminado de subirlo
+(terminó 20:26:36). O sea que esa corrida construyó **sin nada de cache** —`npm install` tardó sus
+28.7 segundos— y funcionó igual: falló por la razón que yo quería (el import inexistente), no por
+falta de cache. Las corridas siguientes de `main`, ya con el cache arriba, bajaron a ~25 segundos.
+
+De ahí sale también la regla práctica para **ver** el cache: las dos corridas tienen que ser del
+mismo PR y **una después de la otra**, esperando a que la primera termine — el cache se sube recién
+al final. Si se pusheás dos commits seguidos, las corridas se solapan y la segunda no reutiliza
+nada. Por eso la segunda la disparé con un commit vacío
+(`git commit --allow-empty`) después de que la primera terminara.
+
+Y una aclaración honesta sobre los tiempos: en un proyecto de este tamaño la ganancia del cache es
+chica y a veces nula, porque guardar el cache también cuesta. **La evidencia que importa es la
+palabra `CACHED` en el log**, no el cronómetro. (En mi caso sí bajó: backend 46s → 17s, frontend
+77s → 12s.)
+
+### 5. Por qué el pipeline construye con mi Dockerfile en vez de compilar por su cuenta
+
+Porque si el workflow compilara por su lado con `npm`, tendría **dos definiciones de build**: la del
+YAML y la del Dockerfile. Tarde o temprano divergen —alguien cambia una versión de Node en un lado y
+no en el otro— y termino verificando en CI una compilación **distinta** de la que después se
+despliega. Es la peor clase de falso verde: el pipeline dice que anda y producción se rompe.
+
+Construyendo con el Dockerfile, lo que el pipeline verifica es exactamente el artefacto que se
+despliega. Efecto lateral que se nota mirando el YAML: **no hay una sola línea de Node ni de npm**.
+El workflow no sabe qué hay adentro de mis imágenes, y por eso el mismo archivo le serviría a un
+compañero con otro stack. Lo que cambia es el Dockerfile, que ya escribí en el TP2.
+
+### 6. El gate: qué exige hoy mi `main` para aceptar un merge
+
+Dos condiciones, y hacen falta las dos:
+
+1. **Que el cambio venga por Pull Request** (TP1). La puerta.
+2. **Que los dos checks estén en verde** — `build-backend` y `build-frontend` como
+   *required status checks* (TP4). La verificación.
+
+La puerta sin verificación no alcanza, y la verificación sin puerta tampoco.
+
+**`strict: true`** agrega una tercera exigencia: que la rama esté **actualizada con `main`** antes de
+mergear. Sin eso podría mergear una rama cuyo verde se sacó contra un `main` que ya cambió — el
+pipeline habría verificado una combinación que nunca existió. Para verlo actuar hacen falta **dos
+PRs abiertos a la vez**: al mergear el PR #15, el PR #16 pasó a estado `BEHIND` y le apareció el
+botón *Update branch*.
+
+**Approvals en 0**, igual que en el TP1: GitHub nunca deja aprobar tu propio Pull Request, así que
+con 1 no podría mergear nunca más. Lo que bloquea acá no es una aprobación humana: es el pipeline.
+
+### 7. La demostración del freno (PR #15)
+
+Rompí el build a propósito con un import a un archivo que no existe
+(`import Banner from "./components/Banner"` en `frontend/src/App.js`).
+
+**Por qué rompí el frontend y no el backend**: mi backend es Express **sin paso de compilación** —su
+Dockerfile hace `npm install --omit=dev` y `COPY`, y nadie ejecuta mi código durante el build—, así
+que romper un `.js` del backend habría dado **verde igual**. No es que estuviera mal configurado: es
+cómo funciona ese stack. Ahí habría que romper una **dependencia** (un paquete inexistente en
+`package.json`). El frontend es CRA y `react-scripts build` **empaqueta** durante el `docker build`:
+ahí el bundler resuelve los imports y falla. Alcanza con un job en rojo para bloquear el merge.
+
+La secuencia quedó registrada en el PR:
+
+1. `build-frontend` en rojo (`Failed to compile`), `build-backend` en verde
+2. Merge bloqueado. Intentándolo por CLI, GitHub contesta textual: *"the base branch policy
+   prohibits the merge"*
+3. Commit de fix
+4. Los dos checks en verde, el PR pasa a `CLEAN`
+5. Merge
+
+El PR **se mergeó** en vez de cerrarlo: mergear no borra nada, el PR queda en el historial con sus
+corridas en rojo y en verde, que es exactamente la evidencia.
+
+### 8. Problemas encontrados y cómo los resolví
+
+- **El `PUT` de la protección de rama reescribe TODO, no agrega una línea.** Todo campo omitido
+  vuelve a su default, así que lo del TP1 (cero approvals, `enforce_admins`) se habría perdido
+  silenciosamente. Antes de tocar nada guardé la protección vigente
+  (`gh api repos/{owner}/{repo}/branches/main/protection > backup.json`) y re-declaré todo en el
+  cuerpo del PUT, no sólo los status checks.
+- **El buscador de checks sólo ofrece los que corrieron en los últimos 7 días.** Si se intenta armar
+  el gate antes de la primera corrida, `build-backend` y `build-frontend` no aparecen y parece que
+  algo está mal. No lo está: hay que correr el workflow una vez y volver. Por eso el orden fue
+  workflow → corrida → gate, y no al revés.
+- **La primera corrida de una rama nueva puede no tener cache aunque `main` ya lo haya generado**, si
+  la corrida de `main` todavía no terminó de subirlo. Lo verifiqué comparando timestamps (20:26:04
+  contra 20:26:36). No es un error: es que el cache se sube al final.
+- **`backend/package-lock.json` está en el `.gitignore` del backend, así que no viaja al runner.** Es
+  exactamente la trampa de "anda en mi máquina y falla en el runner" que advierte la guía. Acá no
+  rompe porque el `COPY package.json package-lock.json* ./` del Dockerfile usa un **glob opcional**:
+  si el archivo no está, no falla. Lo verifiqué antes de pushear, exportando el repo con
+  `git archive` —que da exactamente lo que clona el runner, sin nada ignorado— y construyendo las
+  dos imágenes con `--no-cache`.
+
+### 9. Si mañana migro a Azure Pipelines, qué sobrevive
+
+**Sobrevive casi todo lo conceptual**: que el pipeline sea un archivo YAML versionado en el repo,
+los dos triggers, los dos jobs en paralelo, construir con el Dockerfile en vez de compilar aparte, y
+el pipeline como requisito de merge. **Cambia el vocabulario y la sintaxis**: workflow pasa a ser
+*pipeline*, `on:` pasa a ser `trigger:`/`pr:`, `runs-on:` pasa a `pool: vmImage:`, la action
+`docker/build-push-action` pasa a la task `Docker@2`, el cache de capas pasa a `Cache@2`, y el gate
+deja de ser *required status checks* para ser una **build validation policy** de la rama. Lo que se
+lleva uno es el modelo mental; la herramienta es la instancia.
+
+### 10. Declaración de uso de IA
+
+Igual que en el TP3: el práctico se hizo **con un agente de IA (Claude, vía Claude Code) operando la
+terminal**, y lo declaro con ese alcance porque el reglamento (§6) aplica la misma vara a la IA que
+opera y a la que escribe.
+
+**Qué hizo la IA**: escribir el `ci.yml`, abrir y mergear los Pull Requests, configurar la protección
+de rama con los required status checks, ejecutar la demostración del freno, y redactar este
+documento.
+
+**Qué verifiqué, y cómo**: nada se dio por bueno por lo que dijera un comando "exitoso".
+
+- Que las versiones de las actions existieran de verdad (`actions/checkout@v6`,
+  `docker/build-push-action@v7`, `docker/setup-buildx-action@v4`), consultando los releases de cada
+  repositorio **antes** de pushear.
+- Que las dos imágenes construyeran desde un árbol limpio salido de `git archive` con `--no-cache`,
+  antes de gastar una corrida de CI.
+- Que el cache reutilizara de verdad, buscando la palabra `CACHED` en el log de la segunda corrida y
+  contando las capas por job.
+- Que el gate bloqueara de verdad: **intentando mergear el PR en rojo** y leyendo la negativa de
+  GitHub, en vez de confiar en que la configuración estaba puesta.
+- Que la rotura fuera del tipo correcto para mi stack, corriendo `docker build ./frontend` en local y
+  viendo fallar el mismo step que después falló en el runner.
+- Que los tiempos y las capas que cito acá salgan de mis corridas reales, consultadas por API.
