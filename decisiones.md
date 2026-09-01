@@ -33,8 +33,6 @@ propio PR; en un equipo real ahí iría 1 o más.
   archivo aparecía como "sin seguimiento" en vez de "modificado".
 - Creé las ramas del conflicto pero me quedé en "Propose changes" sin llegar a "Create pull
   request". Las abrí después con *Compare & pull request*.
-- zsh no trata `#` como comentario en modo interactivo, a diferencia de bash. Copié un comando con
-  un comentario al final y zsh tomó esas palabras como argumentos de `git push`.
 
 ### Corrección posterior
 
