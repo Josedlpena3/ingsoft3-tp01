@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from 'react-router-dom';
 import TutorialDataService from "../services/TutorialService";
+import { estadoLegible } from "../lib/tutorials";
 
 const Tutorial = props => {
   const { id }= useParams();
@@ -109,7 +110,7 @@ const Tutorial = props => {
               <label>
                 <strong>Status:</strong>
               </label>
-              {currentTutorial.published ? "Published" : "Pending"}
+              {estadoLegible(currentTutorial)}
             </div>
           </form>
 
