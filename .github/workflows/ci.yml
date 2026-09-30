@@ -21,6 +21,48 @@ jobs:
       - name: Preparar el constructor que sabe cachear
         uses: docker/setup-buildx-action@v4
 
+      # Corre la etapa `test` del Dockerfile y saca el reporte del build.
+      # Si la cobertura no llega al umbral de package.json, este paso falla
+      # y el check se pone en rojo — aunque el código compile perfecto.
+      - name: Tests y cobertura del backend
+        uses: docker/build-push-action@v7
+        with:
+          context: ./backend
+          target: coverage
+          outputs: type=local,dest=./coverage-backend
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Resumen de cobertura del backend
+        if: always()
+        run: |
+          if [ -f ./coverage-backend/coverage-summary.json ]; then
+            node -e '
+              const t = require("./coverage-backend/coverage-summary.json").total;
+              const fila = (n, m) => `| ${n} | ${m.pct}% | ${m.covered}/${m.total} |`;
+              console.log("## Cobertura — backend\n");
+              console.log("| Métrica | % | Cubierto |");
+              console.log("|---|---|---|");
+              console.log(fila("Líneas", t.lines));
+              console.log(fila("Ramas", t.branches));
+              console.log(fila("Funciones", t.functions));
+              console.log(fila("Sentencias", t.statements));
+              console.log("\n> Umbral: líneas 90% · ramas 85%");
+            ' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## Cobertura — backend
+
+            El reporte no se generó: los tests o el umbral fallaron. Mirá el log del paso anterior." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Publicar el reporte del backend
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura-backend
+          path: ./coverage-backend
+          if-no-files-found: ignore
+
       - name: Construir la imagen del backend
         uses: docker/build-push-action@v7
         with:
@@ -43,6 +85,45 @@ jobs:
 
       - name: Preparar el constructor que sabe cachear
         uses: docker/setup-buildx-action@v4
+
+      - name: Tests y cobertura del frontend
+        uses: docker/build-push-action@v7
+        with:
+          context: ./frontend
+          target: coverage
+          outputs: type=local,dest=./coverage-frontend
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+      - name: Resumen de cobertura del frontend
+        if: always()
+        run: |
+          if [ -f ./coverage-frontend/coverage-summary.json ]; then
+            node -e '
+              const t = require("./coverage-frontend/coverage-summary.json").total;
+              const fila = (n, m) => `| ${n} | ${m.pct}% | ${m.covered}/${m.total} |`;
+              console.log("## Cobertura — frontend\n");
+              console.log("| Métrica | % | Cubierto |");
+              console.log("|---|---|---|");
+              console.log(fila("Líneas", t.lines));
+              console.log(fila("Ramas", t.branches));
+              console.log(fila("Funciones", t.functions));
+              console.log(fila("Sentencias", t.statements));
+              console.log("\n> Umbral: líneas 90% · ramas 85%");
+            ' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## Cobertura — frontend
+
+            El reporte no se generó: los tests o el umbral fallaron. Mirá el log del paso anterior." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Publicar el reporte del frontend
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura-frontend
+          path: ./coverage-frontend
+          if-no-files-found: ignore
 
       - name: Construir la imagen del frontend
         uses: docker/build-push-action@v7

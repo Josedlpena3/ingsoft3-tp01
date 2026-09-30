@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import TutorialDataService from "../services/TutorialService";
 import { Link } from "react-router-dom";
+import { estadoLegible } from "../lib/tutorials";
 
 const TutorialsList = () => {
   const [tutorials, setTutorials] = useState([]);
@@ -128,7 +129,7 @@ const TutorialsList = () => {
               <label>
                 <strong>Status:</strong>
               </label>{" "}
-              {currentTutorial.published ? "Published" : "Pending"}
+              {estadoLegible(currentTutorial)}
             </div>
 
             <Link

@@ -4,7 +4,8 @@
   "description": "Node.js Restful CRUD API with Node.js, Express and MongoDB",
   "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest",
+    "test:coverage": "jest --coverage"
   },
   "keywords": [
     "nodejs",
@@ -19,5 +20,31 @@
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "mongoose": "^6.11.1"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "collectCoverageFrom": [
+      "app/**/*.js",
+      "!app/models/**",
+      "!app/config/**",
+      "!app/routes/**",
+      "!app/controllers/**"
+    ],
+    "coverageReporters": [
+      "text",
+      "text-summary",
+      "json-summary",
+      "lcov",
+      "cobertura"
+    ],
+    "coverageThreshold": {
+      "global": {
+        "lines": 90,
+        "branches": 85
+      }
+    }
   }
 }
