@@ -205,9 +205,17 @@ jobs:
       - name: Bajar el codigo al runner
         uses: actions/checkout@v6
 
+      # Una config de docker SIN credential helper: el de Docker Desktop se cuelga
+      # bajo el servicio del runner. Los plugins del CLI (entre ellos `compose`)
+      # se enlazan desde la config real, porque docker los busca dentro de
+      # DOCKER_CONFIG y sin ellos `docker compose` no existe.
       - name: Preparar una config de docker sin credential helper
         shell: bash
-        run: mkdir -p "$DOCKER_CONFIG" && echo '{}' > "$DOCKER_CONFIG/config.json"
+        run: |
+          mkdir -p "$DOCKER_CONFIG"
+          echo '{}' > "$DOCKER_CONFIG/config.json"
+          ln -sfn "$HOME/.docker/cli-plugins" "$DOCKER_CONFIG/cli-plugins"
+          docker compose version
 
       - name: Levantar QA
         shell: bash
@@ -260,9 +268,17 @@ jobs:
       - name: Bajar el codigo al runner
         uses: actions/checkout@v6
 
+      # Una config de docker SIN credential helper: el de Docker Desktop se cuelga
+      # bajo el servicio del runner. Los plugins del CLI (entre ellos `compose`)
+      # se enlazan desde la config real, porque docker los busca dentro de
+      # DOCKER_CONFIG y sin ellos `docker compose` no existe.
       - name: Preparar una config de docker sin credential helper
         shell: bash
-        run: mkdir -p "$DOCKER_CONFIG" && echo '{}' > "$DOCKER_CONFIG/config.json"
+        run: |
+          mkdir -p "$DOCKER_CONFIG"
+          echo '{}' > "$DOCKER_CONFIG/config.json"
+          ln -sfn "$HOME/.docker/cli-plugins" "$DOCKER_CONFIG/cli-plugins"
+          docker compose version
 
       - name: Levantar PROD
         shell: bash
