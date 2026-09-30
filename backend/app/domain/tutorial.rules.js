@@ -64,3 +64,26 @@ module.exports = {
   escaparRegex,
   construirFiltroBusqueda
 };
+
+// Regla 5 — resumen del estado de la coleccion, para el panel de la app.
+// Cuenta publicados y pendientes, y calcula el porcentaje de avance.
+function resumirColeccion(tutoriales) {
+  if (!Array.isArray(tutoriales)) return { total: 0, publicados: 0, pendientes: 0, avance: 0 };
+  const total = tutoriales.length;
+  const publicados = tutoriales.filter(t => t && t.published === true).length;
+  const pendientes = total - publicados;
+  const avance = total === 0 ? 0 : Math.round((publicados / total) * 100);
+  return { total, publicados, pendientes, avance };
+}
+
+// Regla 6 — etiqueta del avance para mostrar en el panel.
+function etiquetaDeAvance(avance) {
+  if (typeof avance !== "number" || Number.isNaN(avance)) return "sin datos";
+  if (avance === 100) return "todo publicado";
+  if (avance >= 50) return "mas de la mitad";
+  if (avance > 0) return "recien empezando";
+  return "nada publicado";
+}
+
+module.exports.resumirColeccion = resumirColeccion;
+module.exports.etiquetaDeAvance = etiquetaDeAvance;
