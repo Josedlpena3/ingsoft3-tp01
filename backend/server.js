@@ -3,8 +3,11 @@ const cors = require("cors");
 
 const app = express();
 
+// El front pide siempre al mismo origen (nginx hace de proxy), asi que CORS no
+// hace falta para la app. Se deja abierto para poder pegarle a la API directo
+// desde cualquier entorno al diagnosticar.
 var corsOptions = {
-  origin: "http://localhost:8081"
+  origin: process.env.CORS_ORIGIN || "*"
 };
 
 app.use(cors(corsOptions));
@@ -34,10 +37,18 @@ app.get("/", (req, res) => {
   res.json({ message: "Welcome to bezkoder application." });
 });
 
+// Liveness: dice que el proceso esta arriba. No toca la base a proposito:
+// el smoke test pega ademas a /api/tutorials, que si la toca.
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "ok", commit: process.env.APP_COMMIT || "desconocido" });
+});
+
 require("./app/routes/turorial.routes")(app);
 
 // set port, listen for requests
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
+// 0.0.0.0 y no localhost: adentro de un contenedor, localhost es el contenedor
+// mismo, y nadie de afuera lo alcanza.
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server is running on port ${PORT}.`);
 });

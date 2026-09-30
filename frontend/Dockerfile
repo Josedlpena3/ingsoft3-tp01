@@ -32,7 +32,14 @@ COPY --from=test /usr/src/app/coverage /
 # --- Etapa 4: nginx sirve los estaticos ---
 FROM nginx:1.27-alpine AS runtime
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# La plantilla va a /etc/nginx/templates: la imagen de nginx corre envsubst
+# sobre ella al ARRANCAR, asi que la direccion del backend entra por variable
+# de entorno y no queda horneada en la imagen.
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+
+# Valor por defecto para levantar con el compose de siempre; cada entorno lo pisa.
+ENV BACKEND_URL=http://backend:8080
+ENV NGINX_ENVSUBST_FILTER="BACKEND_"
 COPY --from=build /usr/src/app/build /usr/share/nginx/html
 
 EXPOSE 80

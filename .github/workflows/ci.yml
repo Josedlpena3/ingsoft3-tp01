@@ -6,6 +6,11 @@ on:
   push:
     branches: [main]
 
+# Necesario para publicar los paquetes en ghcr.io con el GITHUB_TOKEN.
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build-backend:
     runs-on: ubuntu-latest
@@ -63,12 +68,26 @@ jobs:
           path: ./coverage-backend
           if-no-files-found: ignore
 
-      - name: Construir la imagen del backend
+      # Solo desde main. En un PR este paso sale SALTEADO: paso todo y aun asi
+      # no publica — el registry solo recibe lo que ya esta en la rama principal.
+      - name: Entrar al registry
+        if: github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ULTIMO paso del job, a proposito: despues de los tests y del umbral.
+      # Se publica lo que ya se verifico, nunca antes.
+      - name: Construir y publicar la imagen del backend
         uses: docker/build-push-action@v7
         with:
           context: ./backend
-          push: false
-          tags: backend:ci
+          push: ${{ github.ref == 'refs/heads/main' }}
+          tags: |
+            ghcr.io/josedlpena3/ingsoft3-tp01-backend:sha-${{ github.sha }}
+            ghcr.io/josedlpena3/ingsoft3-tp01-backend:latest
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
 
@@ -125,11 +144,122 @@ jobs:
           path: ./coverage-frontend
           if-no-files-found: ignore
 
-      - name: Construir la imagen del frontend
+      # Solo desde main. En un PR este paso sale SALTEADO: paso todo y aun asi
+      # no publica — el registry solo recibe lo que ya esta en la rama principal.
+      - name: Entrar al registry
+        if: github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ULTIMO paso del job, a proposito: despues de los tests y del umbral.
+      # Se publica lo que ya se verifico, nunca antes.
+      - name: Construir y publicar la imagen del frontend
         uses: docker/build-push-action@v7
         with:
           context: ./frontend
-          push: false
-          tags: frontend:ci
+          push: ${{ github.ref == 'refs/heads/main' }}
+          tags: |
+            ghcr.io/josedlpena3/ingsoft3-tp01-frontend:sha-${{ github.sha }}
+            ghcr.io/josedlpena3/ingsoft3-tp01-frontend:latest
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
+
+  # ── Promocion automatica a QA ────────────────────────────────────────────────
+  # Corre en el runner self-hosted (mi maquina). El deploy lo dispara ESTE job:
+  # nadie ejecuta un docker compose a mano.
+  deploy-qa:
+    runs-on: self-hosted
+    needs: [build-backend, build-frontend]
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: qa
+      url: http://localhost:3000
+    env:
+      # Se despliega la imagen identificada por ESTE commit, no "la ultima".
+      IMAGE_TAG: sha-${{ github.sha }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+    steps:
+      - name: Bajar el codigo al runner
+        uses: actions/checkout@v6
+
+      - name: Levantar QA
+        shell: bash
+        run: |
+          echo "Desplegando $IMAGE_TAG en QA"
+          docker compose -f compose.qa.yml pull
+          docker compose -f compose.qa.yml up -d --remove-orphans
+
+      # Reintentos: el contenedor puede decir "arriba" antes de aceptar trafico.
+      # Pega a /health (el proceso vive) Y a /api/tutorials (la base responde):
+      # si solo mirara /health, una base caida pasaria en verde.
+      - name: Smoke test de QA
+        shell: bash
+        env:
+          URL_API: http://localhost:8080
+          URL_FRONT: http://localhost:3000
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 10 "$URL_API/health" > /dev/null \
+               && curl -fsS --max-time 10 "$URL_API/api/tutorials" > /dev/null \
+               && curl -fsS --max-time 10 "$URL_FRONT/" > /dev/null; then
+              echo "QA responde: API viva, base accesible y front sirviendo"
+              curl -fsS "$URL_API/health"; echo
+              exit 0
+            fi
+            echo "  intento $i/30 — todavia no responde, reintento en 10s"
+            sleep 10
+          done
+          echo "QA no respondio a tiempo"
+          docker compose -f compose.qa.yml ps
+          docker compose -f compose.qa.yml logs --tail 40
+          exit 1
+
+  # ── Promocion a PROD, detras del gate humano ────────────────────────────────
+  # El environment `production` tiene un required reviewer: el job queda en
+  # "Waiting for review" hasta que alguien apruebe. La aprobacion vive en
+  # GitHub, no en el destino.
+  deploy-prod:
+    runs-on: self-hosted
+    needs: [deploy-qa]
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: http://localhost:3001
+    env:
+      IMAGE_TAG: sha-${{ github.sha }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+    steps:
+      - name: Bajar el codigo al runner
+        uses: actions/checkout@v6
+
+      - name: Levantar PROD
+        shell: bash
+        run: |
+          echo "Desplegando $IMAGE_TAG en PROD"
+          docker compose -f compose.prod.yml pull
+          docker compose -f compose.prod.yml up -d --remove-orphans
+
+      - name: Smoke test de PROD
+        shell: bash
+        env:
+          URL_API: http://localhost:8081
+          URL_FRONT: http://localhost:3001
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 10 "$URL_API/health" > /dev/null \
+               && curl -fsS --max-time 10 "$URL_API/api/tutorials" > /dev/null \
+               && curl -fsS --max-time 10 "$URL_FRONT/" > /dev/null; then
+              echo "PROD responde: API viva, base accesible y front sirviendo"
+              curl -fsS "$URL_API/health"; echo
+              exit 0
+            fi
+            echo "  intento $i/30 — todavia no responde, reintento en 10s"
+            sleep 10
+          done
+          echo "PROD no respondio a tiempo"
+          docker compose -f compose.prod.yml ps
+          docker compose -f compose.prod.yml logs --tail 40
+          exit 1

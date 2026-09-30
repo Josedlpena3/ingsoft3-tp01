@@ -1,0 +1,62 @@
+# Entorno QA — lo levanta el pipeline, no una persona.
+#
+# name: es lo que aisla los dos entornos. Sin esta clave, Compose usa el nombre
+# de la carpeta como proyecto y el deploy de un entorno MATA los contenedores
+# del otro.
+name: qa
+
+services:
+  db:
+    image: mongo:7
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-appuser}
+      MONGO_INITDB_ROOT_PASSWORD: ${DB_PASSWORD:?falta DB_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DB_NAME:-bezkoder_db}
+    volumes:
+      # Volumen propio: cada entorno tiene SUS datos.
+      - mongo_data_qa:/data/db
+    networks: [tienda_net]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  backend:
+    # La imagen que el pipeline construyo, verifico y publico, identificada por
+    # el commit. No se reconstruye: se despliega EXACTAMENTE lo que se verifico.
+    image: ghcr.io/josedlpena3/ingsoft3-tp01-backend:${IMAGE_TAG:?falta IMAGE_TAG}
+    restart: unless-stopped
+    environment:
+      PORT: 8080
+      APP_COMMIT: ${IMAGE_TAG}
+      MONGO_URL: mongodb://${MONGO_ROOT_USERNAME:-appuser}:${DB_PASSWORD}@db:27017/${MONGO_DB_NAME:-bezkoder_db}?authSource=admin
+    ports:
+      # Publicado para que el smoke test pueda pegarle directo.
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [tienda_net]
+
+  frontend:
+    image: ghcr.io/josedlpena3/ingsoft3-tp01-frontend:${IMAGE_TAG:?falta IMAGE_TAG}
+    restart: unless-stopped
+    environment:
+      # La MISMA imagen en los dos entornos: lo unico que cambia es esta variable,
+      # que nginx resuelve al arrancar. Aca los dos apuntan a "backend" porque
+      # cada entorno es un proyecto de Compose con su propia red.
+      BACKEND_URL: http://backend:8080
+    ports:
+      - "3000:80"
+    depends_on: [backend]
+    networks: [tienda_net]
+
+networks:
+  tienda_net:
+    driver: bridge
+
+volumes:
+  mongo_data_qa:

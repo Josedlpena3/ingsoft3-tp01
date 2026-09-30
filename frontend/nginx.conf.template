@@ -1,0 +1,41 @@
+# PLANTILLA — no es la configuracion final.
+#
+# La imagen de nginx corre envsubst sobre todo lo que este en
+# /etc/nginx/templates/*.template al arrancar el contenedor, y deja el
+# resultado en /etc/nginx/conf.d/. Por eso ${BACKEND_URL} se resuelve al
+# ARRANCAR y no al construir: la MISMA imagen sirve en QA y en PROD, y cada
+# una habla con su propio backend.
+#
+# NGINX_ENVSUBST_FILTER limita la sustitucion a las variables que empiezan con
+# BACKEND_, para que envsubst no toque las variables propias de nginx ($uri,
+# $host, $remote_addr...).
+
+server {
+    listen 80;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # DNS interno de Docker, para que nginx vuelva a resolver el nombre del
+    # servicio en vez de cachearlo (o fallar al arrancar si el backend todavia
+    # no esta arriba).
+    resolver 127.0.0.11 valid=30s ipv6=off;
+
+    # La SPA de React, con fallback a index.html para las rutas del cliente.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Proxy reverso hacia el backend. proxy_pass SIN barra final para que
+    # /api/tutorials llegue tal cual: con barra, nginx recorta el prefijo /api.
+    location /api/ {
+        set $backend_api ${BACKEND_URL};
+        proxy_pass $backend_api;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
