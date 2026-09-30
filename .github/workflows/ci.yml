@@ -197,25 +197,9 @@ jobs:
       # Se despliega la imagen identificada por ESTE commit, no "la ultima".
       IMAGE_TAG: sha-${{ github.sha }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-      # El credsStore de Docker Desktop se cuelga bajo el servicio del runner,
-      # que no tiene sesion grafica. Los paquetes son publicos: con una config
-      # vacia, docker no consulta ningun helper.
-      DOCKER_CONFIG: /tmp/docker-sin-helper
     steps:
       - name: Bajar el codigo al runner
         uses: actions/checkout@v6
-
-      # Una config de docker SIN credential helper: el de Docker Desktop se cuelga
-      # bajo el servicio del runner. Los plugins del CLI (entre ellos `compose`)
-      # se enlazan desde la config real, porque docker los busca dentro de
-      # DOCKER_CONFIG y sin ellos `docker compose` no existe.
-      - name: Preparar una config de docker sin credential helper
-        shell: bash
-        run: |
-          mkdir -p "$DOCKER_CONFIG"
-          echo '{}' > "$DOCKER_CONFIG/config.json"
-          ln -sfn "$HOME/.docker/cli-plugins" "$DOCKER_CONFIG/cli-plugins"
-          docker compose version
 
       - name: Levantar QA
         shell: bash
@@ -263,22 +247,9 @@ jobs:
     env:
       IMAGE_TAG: sha-${{ github.sha }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-      DOCKER_CONFIG: /tmp/docker-sin-helper
     steps:
       - name: Bajar el codigo al runner
         uses: actions/checkout@v6
-
-      # Una config de docker SIN credential helper: el de Docker Desktop se cuelga
-      # bajo el servicio del runner. Los plugins del CLI (entre ellos `compose`)
-      # se enlazan desde la config real, porque docker los busca dentro de
-      # DOCKER_CONFIG y sin ellos `docker compose` no existe.
-      - name: Preparar una config de docker sin credential helper
-        shell: bash
-        run: |
-          mkdir -p "$DOCKER_CONFIG"
-          echo '{}' > "$DOCKER_CONFIG/config.json"
-          ln -sfn "$HOME/.docker/cli-plugins" "$DOCKER_CONFIG/cli-plugins"
-          docker compose version
 
       - name: Levantar PROD
         shell: bash
