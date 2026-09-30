@@ -42,6 +42,7 @@
     "coverageReporters": [
       "text",
       "text-summary",
+      "json-summary",
       "lcov",
       "cobertura"
     ],
