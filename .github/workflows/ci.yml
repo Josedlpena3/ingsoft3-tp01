@@ -200,7 +200,7 @@ jobs:
       # El credsStore de Docker Desktop se cuelga bajo el servicio del runner,
       # que no tiene sesion grafica. Los paquetes son publicos: con una config
       # vacia, docker no consulta ningun helper.
-      DOCKER_CONFIG: ${{ runner.temp }}/docker-sin-helper
+      DOCKER_CONFIG: /tmp/docker-sin-helper
     steps:
       - name: Bajar el codigo al runner
         uses: actions/checkout@v6
@@ -255,7 +255,7 @@ jobs:
     env:
       IMAGE_TAG: sha-${{ github.sha }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-      DOCKER_CONFIG: ${{ runner.temp }}/docker-sin-helper
+      DOCKER_CONFIG: /tmp/docker-sin-helper
     steps:
       - name: Bajar el codigo al runner
         uses: actions/checkout@v6
