@@ -28,6 +28,10 @@ services:
     # La imagen que el pipeline construyo, verifico y publico, identificada por
     # el commit. No se reconstruye: se despliega EXACTAMENTE lo que se verifico.
     image: ghcr.io/josedlpena3/ingsoft3-tp01-backend:${IMAGE_TAG:?falta IMAGE_TAG}
+    # El pipeline construye en x86 y esta maquina es ARM: Docker Desktop las
+    # corre con Rosetta. Construir la variante ARM en CI tardaba mas de 20
+    # minutos bajo QEMU, y el deploy tiene que ser rapido.
+    platform: linux/amd64
     restart: unless-stopped
     environment:
       PORT: 8080
@@ -43,6 +47,7 @@ services:
 
   frontend:
     image: ghcr.io/josedlpena3/ingsoft3-tp01-frontend:${IMAGE_TAG:?falta IMAGE_TAG}
+    platform: linux/amd64
     restart: unless-stopped
     environment:
       # La MISMA imagen en los dos entornos: lo unico que cambia es esta variable,
