@@ -14,6 +14,30 @@ además **la app del semestre**. Cada TP agrega una capa sobre el mismo artefact
 
 Documentación: [`decisiones.md`](decisiones.md) · [`evidencias.md`](evidencias.md)
 
+## Entornos
+
+El pipeline despliega solo: al entrar un cambio a `main` publica las imágenes en
+ghcr.io etiquetadas con el commit, las despliega en QA, y espera aprobación humana
+antes de tocar producción.
+
+| | QA | PROD |
+|---|---|---|
+| Front | <http://localhost:3000> | <http://localhost:3001> |
+| API | <http://localhost:8080> | <http://localhost:8081> |
+| Promoción | automática al mergear | con aprobación manual |
+| Base | volumen `mongo_data_qa` | volumen `mongo_data_prod` |
+
+Los dos corren **la misma imagen**: la dirección del backend no está adentro, se lee
+de `BACKEND_URL` al arrancar. `GET /health` de cada API devuelve el commit que está
+corriendo, así se sabe qué versión hay en cada entorno.
+
+Los despliegues los ejecuta un runner self-hosted. Para levantarlo:
+
+```bash
+cd ~/actions-runner && ./run.sh
+```
+
+
 ## La app
 
 CRUD de "Tutorials" (adaptado de bezkoder), partido en tres servicios:
