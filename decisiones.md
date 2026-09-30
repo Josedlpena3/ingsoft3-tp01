@@ -2,6 +2,22 @@
 
 Un documento por semestre, una sección por práctico.
 
+## Enlaces de este TP (TP6)
+
+| Qué prueba | Dirección |
+|---|---|
+| Paquete del backend (público) | <https://github.com/Josedlpena3/ingsoft3-tp01/pkgs/container/ingsoft3-tp01-backend> |
+| Paquete del frontend (público) | <https://github.com/Josedlpena3/ingsoft3-tp01/pkgs/container/ingsoft3-tp01-frontend> |
+| Cadena · un PR que pasó todo y **no publicó** | <https://github.com/Josedlpena3/ingsoft3-tp01/actions/runs/36767764248> |
+| Cadena · `main`, con «publicar» como último paso | <https://github.com/Josedlpena3/ingsoft3-tp01/actions/runs/36787476474> |
+| El gate diciendo **no**, con motivo | <https://github.com/Josedlpena3/ingsoft3-tp01/actions/runs/36776699110> |
+| El flujo completo: QA → aprobación → PROD | <https://github.com/Josedlpena3/ingsoft3-tp01/actions/runs/36787476474> |
+| QA | <http://localhost:3000> · API <http://localhost:8080> |
+| PROD | <http://localhost:3001> · API <http://localhost:8081> |
+
+Los entornos corren sobre mi máquina (fallback local, §3.6 del enunciado). Para la defensa levanto
+el runner con `cd ~/actions-runner && ./run.sh`.
+
 ---
 
 ## TP1 — Git colaborativo
@@ -408,3 +424,187 @@ Resolví el TP con ayuda de Claude, usándolo como asistente de chat para escrib
 configuración de cobertura. Las decisiones del trabajo fueron mías: elegí las cuatro reglas
 iniciales, definí el umbral de cobertura (90/85) después de ver la medición real, y decidí excluir el
 controller de la cuenta.
+
+---
+
+## TP6 — CD: environments, aprobaciones y deployment patterns
+
+Los enlaces de este práctico están arriba de todo, al principio del documento.
+
+### Por qué el artefacto se publica sólo con la verificación en verde
+
+El registry es el lugar del que después se despliega. Si publicara siempre, un tag del registry
+dejaría de significar *"esto pasó las pruebas"* y pasaría a significar apenas *"esto se construyó
+alguna vez"* — y entonces desplegar desde ahí sería una apuesta.
+
+Mi cadena tiene tres eslabones: **nada entra a `main` sin verde** (los required checks del TP4 y el
+umbral del TP5), **sólo `main` publica** (`if: github.ref == 'refs/heads/main'`), y **publicar es el
+último paso del job**, después de los tests. El tercero es el que más se saltea: si publicara antes,
+las dos primeras garantías no servirían de nada.
+
+En un PR el paso «Entrar al registry» aparece **salteado**, no fallado. Ésa es la diferencia que
+prueba que no publica por el `if` y no por un error.
+
+### Continuous Delivery, no Continuous Deployment
+
+Implementé **Delivery**: cada cambio que entra a `main` queda *listo* para producción y llega solo
+hasta QA, pero el salto a PROD requiere que una persona apruebe.
+
+Elegí eso porque es lo que corresponde a mi contexto: no tengo observabilidad. En *Deployment* cada
+merge llega a producción sin intervención, y eso sólo es responsable cuando el sistema te avisa que
+algo se rompió antes que tus usuarios — métricas, alertas, trazas. Yo hoy tengo un smoke test que
+dice "responde": con eso no me alcanza para soltarle la mano a producción.
+
+### El diseño de la cadena
+
+    build-backend  ┐
+                   ├→ deploy-qa ──→ deploy-prod
+    build-frontend ┘   (auto)       (environment: production)
+
+- **`needs`** ordena: `deploy-qa` espera a los dos builds; `deploy-prod` espera a QA. Si QA falla,
+  producción ni se plantea.
+- **`if: github.ref == 'refs/heads/main'`** en los dos deploys: un PR construye y testea, pero no
+  despliega nada.
+- **`environment: production`** es lo que enciende el gate. La regla vive en GitHub, no en el
+  destino — por eso funciona igual con Render, con Azure o con mi máquina.
+
+**Alcance de los secrets:** `DB_PASSWORD` es secret de repositorio porque los dos entornos lo usan.
+En un despliegue real cada entorno tendría el suyo como *environment secret*, para que un job de QA
+no pueda ni leer la credencial de producción. Hoy no aplica porque las dos bases son contenedores en
+mi máquina, pero es la separación que hay que tener si esto sale a una nube.
+
+### Qué mira mi aprobador antes de aprobar
+
+Tres cosas, y la primera es la que más me importa:
+
+1. **Que QA haga lo que tiene que hacer, no que responda.** El smoke automático dice que hay un 200
+   del otro lado. Yo abro la interfaz, creo un tutorial y confirmo que persiste.
+2. **Qué commit está en QA.** `/health` devuelve el commit, así que verifico que lo que probé es lo
+   que se va a promover.
+3. **Qué entra en el cambio.** Leo el diff del PR que lo originó.
+
+Lo hice en serio: **rechacé** un deployment porque QA acababa de levantarse y no había verificado
+nada más que el smoke, y aprobé el siguiente recién después de mirar la interfaz.
+
+### Qué prueba mi smoke test y qué no
+
+Pega a tres lugares, con 30 reintentos cada 10 segundos:
+
+- `/health` — el proceso está vivo
+- `/api/tutorials` — **la base responde**
+- `/` del front — nginx está sirviendo
+
+El segundo es el que evita el falso verde clásico: si sólo mirara `/health`, una base caída pasaría
+en verde, porque ese endpoint no la toca a propósito.
+
+**Qué NO prueba.** No dice **qué versión** está corriendo: si el deploy fallara en silencio y
+quedara la versión anterior arriba, el smoke daría verde igual. Por eso hice que `/health` devuelva
+el commit — es lo que convierte "responde" en "responde *esto*". Tampoco prueba que la app sea
+correcta: que devuelva 200 no dice que el alta funcione.
+
+### Lo que gano y lo que pierdo desplegando por imagen
+
+La guía usa Render, que **reconstruye desde el repositorio**: eso rompe la garantía de que lo
+desplegado sea lo verificado, porque entre la verificación y el deploy vuelve a construir.
+
+Mi setup no tiene ese problema: los compose usan `image:` con el tag `sha-<commit>`, así que
+**despliego exactamente el binario que el pipeline verificó y publicó**. Es la ventaja que el TP7
+viene a consolidar y en el fallback local sale gratis.
+
+Lo que pierdo por el fallback local: URLs públicas, entornos ajenos a mi máquina, y cold start real.
+Mis dos entornos son dos proyectos de Compose en mi notebook, y si la apago no existen.
+
+### Qué quedó por variable y qué quedó adentro de la imagen
+
+**Por variable** (se resuelven al arrancar): `BACKEND_URL`, que nginx sustituye en su plantilla; la
+cadena de conexión a Mongo; y `APP_COMMIT`, que alimenta `/health`.
+
+**Adentro de la imagen**: el código compilado del front, las dependencias y la configuración de
+nginx salvo esa variable.
+
+La prueba de que está bien hecho es que **la misma imagen corre en QA y en PROD**. Antes la
+dirección del backend estaba en el `nginx.conf` horneado; ahora es una plantilla y la imagen no sabe
+en qué entorno está.
+
+### Estrategia de despliegue para una producción real
+
+Elegiría **blue-green**.
+
+**Por qué ése.** Tengo dos entornos completos y un rollback que es cambiar a qué versión apunta: eso
+ya es medio blue-green. Con dos slots idénticos, despliego en el que no recibe tráfico, lo verifico
+con el sistema real, y recién ahí muevo el tráfico. Si sale mal, vuelvo moviendo el tráfico otra
+vez, en segundos.
+
+**Por qué no las otras.** *Canary* es mejor —expone el riesgo al 5 % en vez de al 100 %— pero **no
+lo puedo ejecutar hoy**: necesita métricas por versión para decidir si seguir o abortar, y yo no
+tengo ninguna. Sin eso, un canary es una ruleta más lenta. *Rolling* evita duplicar infraestructura
+pero deja dos versiones conviviendo, y con una sola base compartida eso trae problemas de
+compatibilidad de esquema que no quiero. *Feature flags* resuelven otro problema: desacoplan
+desplegar de liberar, y se combinan con cualquiera de las tres.
+
+**Qué me falta para ejecutar canary.** Métricas por versión (tasa de error, latencia), un umbral
+automático de aborto, y trazas para saber *qué* se rompió. Es el TP9.
+
+**El costo de blue-green**: el doble de infraestructura mientras dura el cambio, y una base que
+tiene que funcionar con las dos versiones a la vez — o sea migraciones compatibles hacia atrás.
+
+### Mi plan de rollback, medido
+
+1. Identifico el commit anterior que publicó imagen (`git log` de `main` y verifico el tag en el
+   registry).
+2. Vuelvo PROD a ese tag: `IMAGE_TAG=sha-<anterior> docker compose -f compose.prod.yml up -d`.
+3. Verifico con `/health`, que devuelve el commit — no supongo que volvió, lo confirmo.
+
+**Medido de verdad: 16 segundos**, de arrancar el comando a que `/health` reporte el commit
+anterior. El roll-forward tardó 14. Son tan rápidos porque no se construye nada: las imágenes ya
+están publicadas y sólo se recrean los contenedores.
+
+**Una honestidad sobre el número:** ésos son los segundos *técnicos*. En un incidente real el reloj
+arranca antes — detectar que algo está mal, decidir volver atrás. Eso hoy no lo mido, y sin
+observabilidad podría ser mucho más que 16 segundos.
+
+**Un límite que conviene declarar:** este rollback devuelve el *código*, no los *datos*. Si el
+despliegue malo migró el esquema, volver la imagen no alcanza.
+
+### La letra chica de mi setup
+
+No uso free tier de nube, así que no tengo cold start ni minutos limitados. Lo que sí tengo:
+
+- **El runner corre en primer plano y no sobrevive a un reinicio.** Hay que levantarlo a mano.
+- **Los entornos viven en mi máquina.** Si la apago, no existen — no hay URLs públicas.
+- **Las imágenes corren emuladas.** Se publican para x86 y mi Mac es ARM: Rosetta las traduce.
+- **Actions es ilimitado en repos públicos**, así que el minutaje no me limita.
+
+### Problemas encontrados
+
+Los cuatro aparecieron desplegando de verdad, y ninguno se ve antes.
+
+**1 · La imagen no tenía variante ARM.** Los runners de GitHub son x86 y mi máquina es ARM64: el
+`docker compose pull` fallaba con `no matching manifest for linux/arm64/v8`. Primero lo resolví
+construyendo multi-arquitectura con QEMU… y ahí apareció el problema 4.
+
+**2 · El llavero de macOS, inaccesible desde un servicio.** Había instalado el runner como servicio
+de launchd para que sobreviviera a los reinicios. El `docker compose pull` quedaba colgado **para
+siempre, sin fallar** — lo peor que puede pasar, porque no hay error que leer. La causa: el
+credential helper de Docker Desktop pide el llavero, y un servicio sin sesión gráfica recibe
+*"keychain cannot be accessed because the current session does not allow user interaction"*. Se
+resolvió corriendo el runner en mi sesión con `./run.sh`, que es lo que el enunciado prescribe.
+
+**3 · `docker compose` desapareció.** Intentando esquivar el problema 2, apunté `DOCKER_CONFIG` a un
+directorio limpio. El paso falló con `unknown shorthand flag: 'f' in -f`: docker busca sus **plugins
+adentro** de `DOCKER_CONFIG`, así que al moverlo perdió el subcomando `compose`.
+
+**4 · La emulación costaba 20 minutos por imagen.** Construir la variante ARM bajo QEMU llevaba más
+de veinte minutos *cada una*. Ahí tomé la decisión que más me interesa defender: **publico sólo x86
+y las corro con Rosetta**. El pipeline pasó de 25 minutos a menos de dos.
+
+El razonamiento: en la defensa se mergea un cambio y se mira el deploy en vivo, así que la velocidad
+del pipeline es un requisito, no una comodidad. Y la contrapartida es chica — los contenedores
+corren traducidos, verificado con `process.arch: x64` adentro del contenedor. Para una producción
+real sobre ARM publicaría la variante nativa, pero con un runner ARM en vez de emulación.
+
+### Declaración de uso de IA
+
+Usé Claude como ayuda durante el TP. Me ayudó a entender y resolver los problemas que me aparecieron
+al desplegar, como el error de la imagen sin variante ARM y el runner que se colgaba sin dar error.
+Las decisiones del trabajo las tomé yo, y verifiqué QA a mano antes de aprobar el deploy.
