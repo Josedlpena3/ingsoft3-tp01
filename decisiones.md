@@ -200,3 +200,211 @@ required status checks y abrió y mergeó los PRs. Yo decidí romper el frontend
 que entendí que el back no compila y daría verde igual. Lo verifiqué construyendo las dos imágenes en
 local antes de pushear nada, buscando `CACHED` en el log de la segunda corrida, e intentando mergear
 el PR roto de verdad para ver el mensaje del gate en vez de suponerlo.
+
+---
+
+## TP5 — Calidad automatizada: tests, cobertura y el umbral que frena un merge
+
+### Qué elegí testear y por qué
+
+Mi app era un CRUD pelado: el controller chequeaba que el título no estuviera vacío y el resto era
+pasarle cosas a Mongoose. No había lógica que verificar, así que **agregué las reglas de negocio** y
+las testeé. Son siete:
+
+1. **Validación del título** — obligatorio, entre 3 y 100 caracteres. Antes sólo se miraba que no
+   fuera vacío, así que `"   "` pasaba igual.
+2. **Normalización de la entrada** — recorta los extremos, colapsa espacios dobles, descripción
+   ausente como `""` y `published` en `false` salvo que sea `true` explícito.
+3. **No se puede publicar sin descripción** — lo que se publica lo lee otro, y un tutorial vacío no
+   le sirve a nadie.
+4. **Escapado de la búsqueda** — y ésta es la que arregla un bug que ya tenía.
+5. **Resumen de la colección** — cuenta publicados y pendientes, calcula el avance.
+6. **Etiqueta del avance** — traduce el porcentaje a un texto legible.
+7. **Orden alfabético** — ignorando mayúsculas y acentos.
+
+**Dónde dolía un bug en mi app:** en la regla 4. El `findAll` hacía `new RegExp(title)` con el texto
+**crudo** del usuario. Buscar `(` o `[` hace que `RegExp` lance, y la API respondía **500**. Es el bug
+que elegí como caso testigo porque no lo veía nadie: la búsqueda "funcionaba" mientras nadie
+escribiera un paréntesis.
+
+Del lado del front saqué la lógica de presentación de los componentes a `src/lib/tutorials.js`
+—estado legible, resumen de la descripción, filtro y búsqueda— para poder testearla sin montar el DOM.
+
+### Por qué tuve que refactorizar para poder mockear
+
+`crearTutorial` originalmente agarraba el modelo de Mongoose por su cuenta con un `require` adentro.
+Así no hay forma de testearla sin una base corriendo.
+
+Lo cambié para que **el repositorio entre como parámetro**: `crearTutorial(repo, datos)`. En
+producción recibe el modelo real; en los tests recibe un `jest.fn()`. Lo mismo del lado del front con
+`buscarTutoriales(service, titulo)`.
+
+Ese cambio es lo único que hacía falta, y es lo que separa código testeable de código que no lo es:
+la dependencia entra desde afuera en vez de buscarse adentro.
+
+### Mi umbral: 90 % de líneas y 85 % de ramas
+
+Lo medí antes de elegirlo. Sobre la lógica da hoy **100 % de líneas y 95 % de ramas** en el backend,
+y **100 % y 90,47 %** en el frontend.
+
+Elegí 90/85 y no el número que ya tenía porque un umbral pegado a la medición actual frena en cuanto
+agrego cualquier cosa, y uno muy por debajo no frena nunca. Con 90 hacen falta unas cinco líneas
+nuevas sin test para romperlo — suficiente margen para que el código crezca, suficiente presión para
+que no crezca sin tests.
+
+**Sobre qué métrica:** el umbral va sobre **líneas y ramas** a la vez. La de ramas es la que más me
+importa, porque es la que puede mentir menos: se puede tener 100 % de líneas con la mitad de los `if`
+sin probar por un solo lado.
+
+**Qué haría falta para subirlo:** cubrir el controller, que hoy está afuera. Eso necesita `supertest`
+y levantar Express, que ya es integración — trabajo del TP7.
+
+### Qué dejé afuera de la cuenta, y por qué
+
+**Backend:**
+
+- `app/models/` — el esquema de Mongoose. Es definición de datos, no lógica.
+- `app/config/` — la cadena de conexión.
+- `app/routes/` — la tabla de rutas. Declarativa: no hay nada que decidir.
+- `app/controllers/` — la capa HTTP. No tiene reglas propias: traduce `req`/`res` y delega.
+  Verificarla de verdad necesita integración, que es el TP7.
+
+**Frontend:**
+
+- `src/components/` — la interfaz. Se verifica con pruebas e2e en el TP7.
+- `src/services/TutorialService.js` — la capa HTTP del front: siete funciones de una línea que llaman
+  a axios. Testearla sería comprobar que axios es axios.
+- `index.js` y `serviceWorker.js` — el arranque.
+
+El criterio es el mismo de los dos lados: **entra en la cuenta lo que tiene decisiones; queda afuera
+lo que sólo traduce o declara.**
+
+### El ejercicio de la rama sin cubrir
+
+Me quedan cuatro ramas sin recorrer, y son todas del mismo tipo.
+
+**Backend — `app/domain/tutorial.rules.js`, líneas 26 y 37:**
+
+    const entrada = datos || {};
+
+El camino que no recorre ningún test es el del `|| {}`: el que se toma cuando `datos` llega `null` o
+`undefined`. Todos mis tests le pasan un objeto.
+
+**Qué entrada la recorrería:** `normalizarTutorial(undefined)` o `validarPublicacion(null)`.
+
+**Frontend — `src/lib/tutorials.js`, líneas 23 y 25:** lo mismo con `String(termino || "")` y
+`String(t.title || "")`. La recorrería `filtrarPorTitulo([{}], undefined)`, o sea un tutorial sin
+título.
+
+**Qué decidí hacer:** dejarlas sin cubrir. Son **guardas defensivas** contra un caso que hoy no puede
+pasar: a esas funciones sólo las llama el controller, y lo que les pasa es `req.body`, que Express
+garantiza que es un objeto. Un test que les mande `undefined` subiría el número al 100 % pero estaría
+verificando una situación que mi app no produce — sumaría cobertura sin sumar confianza, que es justo
+lo que no quiero. Las dejo escritas igual porque cuestan una línea y protegen si mañana alguien llama
+a la función desde otro lado.
+
+### Por qué coverage alto no garantiza calidad
+
+Con mi propio código: podría escribir este test y sumar cobertura sin verificar nada.
+
+    it("no verifica nada", () => {
+      validarTitulo("");        // recorre la línea, suma al porcentaje
+      expect(true).toBe(true);  // pero no comprueba el resultado
+    });
+
+La cobertura mide **qué líneas se ejecutaron**, no **qué se comprobó**. Un test sin `expect` útil
+cuenta igual que uno bueno.
+
+Mi criterio para saber si un test sirve es otro: **si invierto la regla que prueba, algo tiene que
+ponerse en rojo.** Por eso los casos de borde — si alguien cambia el `>= 50` de `etiquetaDeAvance`
+por un `> 50`, el test del 50 exacto falla. Sin ese caso, el cambio pasaría con la cobertura intacta.
+
+### El Pull Request bloqueado
+
+**PR #25** — <https://github.com/Josedlpena3/ingsoft3-tp01/pull/25>
+
+Agregué `resumirColeccion` y `etiquetaDeAvance` **sin tests**. El código compilaba perfecto y **los 27
+tests existentes pasaban todos**. El merge quedó bloqueado igual.
+
+Qué se puso en rojo: el check **`build-backend`**. `build-frontend` quedó en verde, porque el código
+nuevo era sólo del backend.
+
+En qué métrica — el log lo dice textual:
+
+    Tests:     27 passed, 27 total
+    Branches:  55% ( 22/40 )
+    Lines:     74.41% ( 32/43 )
+    Jest: "global" coverage threshold for branches (85%) not met: 55%
+    Jest: "global" coverage threshold for lines (90%) not met: 74.41%
+
+Corrida roja: <https://github.com/Josedlpena3/ingsoft3-tp01/actions/runs/36761704673>
+
+**Qué escribí para arreglarlo:** 13 tests sobre las dos funciones nuevas — los cuatro tramos de
+`etiquetaDeAvance` con sus bordes exactos (100, 50, 49, 0), el caso de la lista vacía para que no
+divida por cero, y las entradas inválidas. Con eso volvió a 100 % de líneas y 95 % de ramas, y el PR
+se destrabó.
+
+**PR #26, abierto y en rojo:** <https://github.com/Josedlpena3/ingsoft3-tp01/pull/26> — el mismo
+problema sin arreglar, para que se pueda comprobar que el freno sigue vigente.
+
+### Por qué este freno es distinto del del TP4
+
+El del TP4 pregunta *"¿compila?"*. Éste pregunta *"¿está verificado?"*.
+
+Y ésa es la diferencia que hace interesante al PR #25: **compilaba y los tests pasaban**, y lo frenó
+igual. El gate del TP4 nunca lo habría parado.
+
+**Qué deja pasar igual:** código cubierto por tests que no comprueban nada, y cualquier error de
+diseño o de producto. Que esté verificado no quiere decir que esté bien pensado.
+
+### Mi stack, que no es el de la cátedra
+
+La guía usa .NET + vitest. Yo tengo Node/Express + React con react-scripts, así que la tabla de
+equivalencias me llevó a la columna de JS:
+
+| Lo que había que lograr | Lo que usé |
+|---|---|
+| Dónde viven los tests | Al lado del código, `algo.test.js` |
+| Un test parametrizado | `it.each` |
+| Que la dependencia entre desde afuera | Parámetro de la función (`repo`, `service`) |
+| Fabricar el doble | `jest.fn()` |
+| Medir la cobertura | `jest --coverage` · `react-scripts test --coverage` |
+| Un umbral que rompe el build | `coverageThreshold` de jest |
+| Qué entra en la cuenta | `collectCoverageFrom` |
+| Reporte legible | `lcov` + `json-summary` |
+| Que las herramientas entren al Dockerfile | `npm ci` **sin** `--omit=dev` |
+
+### Cómo corre en el pipeline
+
+Los tests corren **dentro del build de la imagen**, en una etapa `test` del Dockerfile. Lo hice así
+para no romper la decisión del TP4: sigue habiendo **una sola definición de build**. Si la cobertura
+no llega, ese `RUN` devuelve distinto de cero y el build se corta.
+
+Para poder sacar el reporte del build sin arrastrar todo el sistema de archivos agregué una etapa
+`coverage` sobre `scratch`, que contiene únicamente la carpeta del reporte. El workflow la exporta,
+escribe el resumen en la corrida y publica el reporte como artefacto descargable.
+
+Corrida verde con los dos resúmenes y los dos artefactos:
+<https://github.com/Josedlpena3/ingsoft3-tp01/actions/runs/36762868725>
+
+### Problemas que encontré
+
+- **`npm ci` no funcionaba en ninguno de los dos lados.** En el backend porque `package-lock.json`
+  estaba en el `.gitignore` —o sea que no viajaba al runner— y en el frontend porque el lockfile
+  estaba desincronizado de `package.json` desde antes (`type-fest@0.11.0` contra `0.13.1`). Por eso el
+  Dockerfile del front usaba `npm install` y nunca se había notado. Saqué el lockfile del `.gitignore`
+  y regeneré el del frontend.
+- **Las etapas del Dockerfile que nadie referencia no se construyen.** Con BuildKit, si la etapa final
+  no depende de la etapa de tests, los tests **no corren**. Lo resolví apuntando el pipeline
+  directamente a la etapa con `target:`.
+- **El build del front no compila con Node 20** — es el mismo `ERR_OSSL_EVP_UNSUPPORTED` del TP2. En
+  Docker no pasa porque la etapa de build usa `node:16-alpine`.
+- **Commiteé sin querer la carpeta `coverage/`**, que es generada. La saqué y la agregué al
+  `.gitignore` de los dos lados.
+
+### Declaración de uso de IA
+
+Resolví el TP con ayuda de Claude, usándolo como asistente de chat para escribir los tests y la
+configuración de cobertura. Las decisiones del trabajo fueron mías: elegí las cuatro reglas
+iniciales, definí el umbral de cobertura (90/85) después de ver la medición real, y decidí excluir el
+controller de la cuenta.
