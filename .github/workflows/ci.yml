@@ -23,6 +23,11 @@ jobs:
       - name: Bajar el código al runner
         uses: actions/checkout@v6
 
+      # Emulacion, para poder construir la variante ARM desde un runner x86.
+      - name: Preparar la emulacion de otras arquitecturas
+        if: github.ref == 'refs/heads/main'
+        uses: docker/setup-qemu-action@v3
+
       - name: Preparar el constructor que sabe cachear
         uses: docker/setup-buildx-action@v4
 
@@ -85,6 +90,9 @@ jobs:
         with:
           context: ./backend
           push: ${{ github.ref == 'refs/heads/main' }}
+          # Dos arquitecturas: GitHub construye en x86 y el runner de deploy es
+          # ARM. Sin esto el pull falla con "no matching manifest for linux/arm64".
+          platforms: ${{ github.ref == 'refs/heads/main' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           tags: |
             ghcr.io/josedlpena3/ingsoft3-tp01-backend:sha-${{ github.sha }}
             ghcr.io/josedlpena3/ingsoft3-tp01-backend:latest
@@ -101,6 +109,11 @@ jobs:
 
       - name: Bajar el código al runner
         uses: actions/checkout@v6
+
+      # Emulacion, para poder construir la variante ARM desde un runner x86.
+      - name: Preparar la emulacion de otras arquitecturas
+        if: github.ref == 'refs/heads/main'
+        uses: docker/setup-qemu-action@v3
 
       - name: Preparar el constructor que sabe cachear
         uses: docker/setup-buildx-action@v4
@@ -161,6 +174,9 @@ jobs:
         with:
           context: ./frontend
           push: ${{ github.ref == 'refs/heads/main' }}
+          # Dos arquitecturas: GitHub construye en x86 y el runner de deploy es
+          # ARM. Sin esto el pull falla con "no matching manifest for linux/arm64".
+          platforms: ${{ github.ref == 'refs/heads/main' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           tags: |
             ghcr.io/josedlpena3/ingsoft3-tp01-frontend:sha-${{ github.sha }}
             ghcr.io/josedlpena3/ingsoft3-tp01-frontend:latest
@@ -181,9 +197,17 @@ jobs:
       # Se despliega la imagen identificada por ESTE commit, no "la ultima".
       IMAGE_TAG: sha-${{ github.sha }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      # El credsStore de Docker Desktop se cuelga bajo el servicio del runner,
+      # que no tiene sesion grafica. Los paquetes son publicos: con una config
+      # vacia, docker no consulta ningun helper.
+      DOCKER_CONFIG: ${{ runner.temp }}/docker-sin-helper
     steps:
       - name: Bajar el codigo al runner
         uses: actions/checkout@v6
+
+      - name: Preparar una config de docker sin credential helper
+        shell: bash
+        run: mkdir -p "$DOCKER_CONFIG" && echo '{}' > "$DOCKER_CONFIG/config.json"
 
       - name: Levantar QA
         shell: bash
@@ -231,9 +255,14 @@ jobs:
     env:
       IMAGE_TAG: sha-${{ github.sha }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DOCKER_CONFIG: ${{ runner.temp }}/docker-sin-helper
     steps:
       - name: Bajar el codigo al runner
         uses: actions/checkout@v6
+
+      - name: Preparar una config de docker sin credential helper
+        shell: bash
+        run: mkdir -p "$DOCKER_CONFIG" && echo '{}' > "$DOCKER_CONFIG/config.json"
 
       - name: Levantar PROD
         shell: bash
