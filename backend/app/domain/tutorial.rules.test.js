@@ -108,3 +108,62 @@ describe("construirFiltroBusqueda", () => {
     expect(filtro.title.$regex).toBeInstanceOf(RegExp);
   });
 });
+
+// ── Regla 5: resumen de la colección ──────────────────────────────────────────
+
+const { resumirColeccion, etiquetaDeAvance } = require("./tutorial.rules");
+
+describe("resumirColeccion", () => {
+  it("cuenta publicados y pendientes y calcula el avance", () => {
+    // Arrange
+    const lista = [
+      { published: true },
+      { published: true },
+      { published: false },
+      { published: false }
+    ];
+    // Act
+    const resultado = resumirColeccion(lista);
+    // Assert
+    expect(resultado).toEqual({ total: 4, publicados: 2, pendientes: 2, avance: 50 });
+  });
+
+  it("devuelve todo en cero con una lista vacia, sin dividir por cero", () => {
+    expect(resumirColeccion([])).toEqual({ total: 0, publicados: 0, pendientes: 0, avance: 0 });
+  });
+
+  it("devuelve todo en cero si no le pasan una lista", () => {
+    expect(resumirColeccion(null).total).toBe(0);
+    expect(resumirColeccion(undefined).avance).toBe(0);
+  });
+
+  it("no cuenta como publicado un elemento nulo o sin el campo", () => {
+    const resultado = resumirColeccion([null, {}, { published: true }]);
+    expect(resultado.publicados).toBe(1);
+    expect(resultado.pendientes).toBe(2);
+  });
+});
+
+// ── Regla 6: etiqueta del avance ──────────────────────────────────────────────
+
+describe("etiquetaDeAvance", () => {
+  // Los cuatro tramos y sus bordes exactos: si alguien mueve un >= a >,
+  // el caso del 50 se pone en rojo.
+  it.each([
+    [100, "todo publicado"],
+    [75, "mas de la mitad"],
+    [50, "mas de la mitad"],
+    [49, "recien empezando"],
+    [1, "recien empezando"],
+    [0, "nada publicado"]
+  ])("con %i%% de avance devuelve '%s'", (avance, esperado) => {
+    expect(etiquetaDeAvance(avance)).toBe(esperado);
+  });
+
+  it.each([["texto", "50"], ["undefined", undefined], ["NaN", NaN]])(
+    "devuelve 'sin datos' si le pasan %s",
+    (_caso, entrada) => {
+      expect(etiquetaDeAvance(entrada)).toBe("sin datos");
+    }
+  );
+});
