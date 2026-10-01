@@ -10,10 +10,15 @@ const AddTutorial = () => {
   };
   const [tutorial, setTutorial] = useState(initialTutorialState);
   const [submitted, setSubmitted] = useState(false);
+  // Antes el error de la API se iba a console.log: la API contestaba 400 y el
+  // usuario no veia nada, el formulario quedaba igual. La e2e de validacion no
+  // tendria nada que afirmar, porque en la pantalla no pasaba nada.
+  const [error, setError] = useState(null);
 
   const handleInputChange = event => {
     const { name, value } = event.target;
     setTutorial({ ...tutorial, [name]: value });
+    setError(null);
   };
 
   const saveTutorial = () => {
@@ -30,17 +35,23 @@ const AddTutorial = () => {
           description: response.data.description,
           published: response.data.published
         });
+        setError(null);
         setSubmitted(true);
-        console.log(response.data);
       })
       .catch(e => {
-        console.log(e);
+        // El mensaje lo escribe la regla del backend (TP5). El front no lo
+        // reescribe: lo muestra.
+        const mensaje =
+          (e.response && e.response.data && e.response.data.message) ||
+          "No se pudo guardar el tutorial.";
+        setError(mensaje);
       });
   };
 
   const newTutorial = () => {
     setTutorial(initialTutorialState);
     setSubmitted(false);
+    setError(null);
   };
 
   return (
@@ -54,6 +65,14 @@ const AddTutorial = () => {
         </div>
       ) : (
         <div>
+          {/* role="alert" es lo que lo vuelve visible para un lector de
+              pantalla y encontrable para la e2e. */}
+          {error && (
+            <div className="alert alert-danger" role="alert">
+              {error}
+            </div>
+          )}
+
           <div className="form-group">
             <label htmlFor="title">Title</label>
             <input

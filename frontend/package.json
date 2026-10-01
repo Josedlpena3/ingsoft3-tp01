@@ -18,7 +18,9 @@
     "build": "react-scripts build",
     "test": "react-scripts test --watchAll=false",
     "eject": "react-scripts eject",
-    "test:coverage": "react-scripts test --coverage --watchAll=false"
+    "test:coverage": "react-scripts test --coverage --watchAll=false",
+    "test:integracion": "playwright test e2e/api.spec.js",
+    "test:e2e": "playwright test e2e/tutoriales.spec.js"
   },
   "eslintConfig": {
     "extends": "react-app"
@@ -52,5 +54,8 @@
         "branches": 85
       }
     }
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
   }
 }

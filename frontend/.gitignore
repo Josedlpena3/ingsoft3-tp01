@@ -22,3 +22,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 coverage/
+
+# playwright (se generan en cada corrida: viajan como artefacto, no en el repo)
+/playwright-report
+/test-results
+/blob-report
+playwright-results.json

@@ -85,9 +85,11 @@ jobs:
         with:
           context: ./backend
           push: ${{ github.ref == 'refs/heads/main' }}
-          tags: |
-            ghcr.io/josedlpena3/ingsoft3-tp01-backend:sha-${{ github.sha }}
-            ghcr.io/josedlpena3/ingsoft3-tp01-backend:latest
+          # Una SOLA etiqueta, y es el commit. `latest` se mueve: hoy apunta a una
+          # imagen y manana a otra, asi que un entorno que pidiera `latest` no
+          # podria decir QUE esta corriendo, y dos deploys con el mismo texto
+          # darian resultados distintos. El sha-<commit> no se mueve nunca.
+          tags: ghcr.io/josedlpena3/ingsoft3-tp01-backend:sha-${{ github.sha }}
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
 
@@ -161,9 +163,11 @@ jobs:
         with:
           context: ./frontend
           push: ${{ github.ref == 'refs/heads/main' }}
-          tags: |
-            ghcr.io/josedlpena3/ingsoft3-tp01-frontend:sha-${{ github.sha }}
-            ghcr.io/josedlpena3/ingsoft3-tp01-frontend:latest
+          # Una SOLA etiqueta, y es el commit. `latest` se mueve: hoy apunta a una
+          # imagen y manana a otra, asi que un entorno que pidiera `latest` no
+          # podria decir QUE esta corriendo, y dos deploys con el mismo texto
+          # darian resultados distintos. El sha-<commit> no se mueve nunca.
+          tags: ghcr.io/josedlpena3/ingsoft3-tp01-frontend:sha-${{ github.sha }}
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
 
@@ -217,14 +221,154 @@ jobs:
           docker compose -f compose.qa.yml logs --tail 40
           exit 1
 
+  # ── Escalon del medio: la api de QA contra su base de verdad ────────────────
+  # Corre DESPUES de deploy-qa: QA ya esta ejecutando la imagen de ESTA corrida,
+  # asi que lo que se prueba es exactamente lo que se podria promover.
+  # Va antes que las e2e porque es mas barata: si la api esta rota, no vale la
+  # pena levantar un navegador para confirmarlo.
+  integracion:
+    runs-on: self-hosted
+    needs: [deploy-qa]
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 15
+    steps:
+      - name: Bajar el codigo al runner
+        uses: actions/checkout@v6
+
+      - name: Preparar Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      # Sin `playwright install`: esta suite no abre ningun navegador, solo
+      # manda pedidos HTTP. Por eso tarda segundos.
+      - name: Instalar dependencias (sin navegador)
+        run: npm ci
+        working-directory: ./frontend
+
+      - name: Integracion contra la api de QA
+        env:
+          # La API de QA, no el front: son dos servicios con dos direcciones.
+          API_BASE_URL: http://localhost:8080
+        run: npm run test:integracion
+        working-directory: ./frontend
+
+      - name: Resumen de la integracion
+        if: ${{ !cancelled() }}
+        working-directory: ./frontend
+        shell: bash
+        run: |
+          if [ -f playwright-results.json ]; then
+            node -e '
+              const s = require("./playwright-results.json").stats;
+              console.log("## Integracion — contra la api de QA\n");
+              console.log("| | |");
+              console.log("|---|---|");
+              console.log(`| Pasaron | ${s.expected} |`);
+              console.log(`| Fallaron | ${s.unexpected} |`);
+              console.log(`| Salteados | ${s.skipped} |`);
+              console.log(`| Flaky | ${s.flaky} |`);
+            ' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## Integracion — contra la api de QA
+
+            No se genero el reporte: la suite no llego a correr. Mirá el log del paso anterior." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # !cancelled() y no always(): el reporte importa MAS cuando la suite falla.
+      # Este es uno de los DOS unicos lugares del tramo donde esa condicion es
+      # correcta — publicar un artefacto no promueve nada.
+      - name: Publicar el reporte de integracion
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-integracion
+          path: frontend/playwright-report
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ── La punta de la piramide: un navegador de verdad usando QA ───────────────
+  # needs: integracion — si la api esta rota, este job ni arranca. Eso no es un
+  # descuido: es la fila 2 de la tabla de diagnostico.
+  e2e:
+    runs-on: self-hosted
+    needs: [integracion]
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 20
+    steps:
+      - name: Bajar el codigo al runner
+        uses: actions/checkout@v6
+
+      - name: Preparar Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Instalar dependencias y el navegador
+        run: |
+          npm ci
+          npx playwright install chromium
+        working-directory: ./frontend
+
+      - name: e2e contra el front de QA
+        env:
+          # El FRONT de QA. El navegador no sabe nada de la api: le pega a
+          # traves del front, igual que una persona.
+          E2E_BASE_URL: http://localhost:3000
+        run: npm run test:e2e
+        working-directory: ./frontend
+
+      - name: Resumen de las e2e
+        if: ${{ !cancelled() }}
+        working-directory: ./frontend
+        shell: bash
+        run: |
+          if [ -f playwright-results.json ]; then
+            node -e '
+              const s = require("./playwright-results.json").stats;
+              console.log("## e2e — contra el front de QA\n");
+              console.log("| | |");
+              console.log("|---|---|");
+              console.log(`| Pasaron | ${s.expected} |`);
+              console.log(`| Fallaron | ${s.unexpected} |`);
+              console.log(`| Salteados | ${s.skipped} |`);
+              console.log(`| Flaky | ${s.flaky} |`);
+            ' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## e2e — contra el front de QA
+
+            No se genero el reporte: la suite no llego a correr. Mirá el log del paso anterior." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Publicar el reporte e2e
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-e2e
+          path: frontend/playwright-report
+          retention-days: 7
+          if-no-files-found: ignore
+
   # ── Promocion a PROD, detras del gate humano ────────────────────────────────
   # El environment `production` tiene un required reviewer: el job queda en
   # "Waiting for review" hasta que alguien apruebe. La aprobacion vive en
   # GitHub, no en el destino.
   deploy-prod:
     runs-on: self-hosted
-    needs: [deploy-qa]
+    # EL gate: sin las dos suites en verde no se llega ni a PEDIR la aprobacion.
+    # La cadena entera es deploy-qa → integracion → e2e → aca.
+    needs: [e2e]
     if: github.ref == 'refs/heads/main'
+    # Dos merges seguidos no pueden desplegar PROD a la vez. cancel-in-progress
+    # en false: un deploy a produccion empezado se termina, no se corta por la
+    # mitad.
+    concurrency:
+      group: deploy-prod
+      cancel-in-progress: false
     environment:
       name: production
       url: http://localhost:3001

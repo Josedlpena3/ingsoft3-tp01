@@ -7,7 +7,14 @@ FROM node:16-alpine AS build
 WORKDIR /usr/src/app
 
 COPY package.json package-lock.json* yarn.lock* ./
-RUN npm install
+
+# --omit=dev deja afuera a Playwright. Las dos suites del TP7 no corren adentro
+# de la imagen: corren contra el entorno ya desplegado, desde el pipeline. Meter
+# en el build una dependencia que la imagen nunca usa solo la hace mas pesada
+# (y Playwright pide Node 20, mientras que esta etapa necesita Node 16).
+# react-scripts y testing-library viven en "dependencies", asi que la etapa de
+# tests del TP5 sigue teniendo todo lo que necesita.
+RUN npm install --omit=dev
 
 COPY . .
 
