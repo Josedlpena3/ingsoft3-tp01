@@ -235,12 +235,23 @@ jobs:
       - name: Bajar el codigo al runner
         uses: actions/checkout@v6
 
-      - name: Preparar Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
+      # Sin actions/setup-node a proposito. Este runner es mi propia maquina y ya
+      # tiene Node 20: la accion se ponia a bajar Node y un cache de npm de
+      # 1,2 GB a 0,5 MB/s por mi conexion de casa, y la corrida murio por
+      # timeout sin llegar a correr un solo test.
+      #
+      # Lo que si hace falta es dejar escrito en el log contra que version
+      # corrio, y cortar temprano si alguien le cambia el Node a la maquina.
+      - name: Comprobar Node
+        shell: bash
+        run: |
+          node -v
+          npm -v
+          mayor=$(node -p 'process.versions.node.split(".")[0]')
+          if [ "$mayor" -lt 20 ]; then
+            echo "Playwright necesita Node 20 o mas nuevo; este runner tiene $(node -v)"
+            exit 1
+          fi
 
       # Sin `playwright install`: esta suite no abre ningun navegador, solo
       # manda pedidos HTTP. Por eso tarda segundos.
@@ -301,12 +312,23 @@ jobs:
       - name: Bajar el codigo al runner
         uses: actions/checkout@v6
 
-      - name: Preparar Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
+      # Sin actions/setup-node a proposito. Este runner es mi propia maquina y ya
+      # tiene Node 20: la accion se ponia a bajar Node y un cache de npm de
+      # 1,2 GB a 0,5 MB/s por mi conexion de casa, y la corrida murio por
+      # timeout sin llegar a correr un solo test.
+      #
+      # Lo que si hace falta es dejar escrito en el log contra que version
+      # corrio, y cortar temprano si alguien le cambia el Node a la maquina.
+      - name: Comprobar Node
+        shell: bash
+        run: |
+          node -v
+          npm -v
+          mayor=$(node -p 'process.versions.node.split(".")[0]')
+          if [ "$mayor" -lt 20 ]; then
+            echo "Playwright necesita Node 20 o mas nuevo; este runner tiene $(node -v)"
+            exit 1
+          fi
 
       - name: Instalar dependencias y el navegador
         run: |
