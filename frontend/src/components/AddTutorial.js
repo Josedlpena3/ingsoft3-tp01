@@ -22,8 +22,11 @@ const AddTutorial = () => {
   };
 
   const saveTutorial = () => {
+    // El nombre del campo es parte del contrato con la api: la regla del
+    // backend valida `datos.title`. Renombrarlo aca por prolijidad rompio el
+    // alta entera sin romper ni un unitario — lo atrapo la e2e.
     var data = {
-      titulo: tutorial.title,
+      title: tutorial.title,
       description: tutorial.description
     };
 
