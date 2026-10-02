@@ -2,6 +2,25 @@
 
 Un documento por semestre, una sección por práctico.
 
+## Enlaces de este TP (TP7)
+
+| Qué prueba | Dirección |
+|---|---|
+| Paquete del backend (público, con sus `sha-…`) | <https://github.com/Josedlpena3/ingsoft3-tp01/pkgs/container/ingsoft3-tp01-backend> |
+| Paquete del frontend (público, con sus `sha-…`) | <https://github.com/Josedlpena3/ingsoft3-tp01/pkgs/container/ingsoft3-tp01-frontend> |
+| **El commit que rompió la app** (una palabra, en `AddTutorial.js`) | <https://github.com/Josedlpena3/ingsoft3-tp01/commit/4292619ec27354efc83725fffca3a0d3c5136e3b> |
+| **La corrida roja**: integración 🟢 · e2e 🔴 · `deploy-prod` sin arrancar | <https://github.com/Josedlpena3/ingsoft3-tp01/actions/runs/37063311727> |
+| ↳ reporte `playwright-report-integracion` (en verde) | <https://github.com/Josedlpena3/ingsoft3-tp01/actions/runs/37063311727#artifacts> |
+| ↳ reporte `playwright-report-e2e` (en rojo, con la traza) | <https://github.com/Josedlpena3/ingsoft3-tp01/actions/runs/37063311727#artifacts> |
+| La corrida completa en verde, hasta PROD | <https://github.com/Josedlpena3/ingsoft3-tp01/actions/runs/37064098081> |
+| QA | <http://localhost:3000> · API <http://localhost:8080> |
+| PROD | <http://localhost:3001> · API <http://localhost:8081> |
+
+Los entornos corren sobre mi máquina (fallback local, §3.6 del enunciado). Para la defensa levanto
+el runner con `cd ~/actions-runner && ./run.sh`, y los dos entornos con el pipeline.
+
+---
+
 ## Enlaces de este TP (TP6)
 
 | Qué prueba | Dirección |
@@ -608,3 +627,234 @@ real sobre ARM publicaría la variante nativa, pero con un runner ARM en vez de 
 Usé Claude como ayuda durante el TP. Me ayudó a entender y resolver los problemas que me aparecieron
 al desplegar, como el error de la imagen sin variante ARM y el runner que se colgaba sin dar error.
 Las decisiones del trabajo las tomé yo, y verifiqué QA a mano antes de aprobar el deploy.
+
+---
+
+## TP7 — Contenedores en el pipeline: integración y e2e como gate
+
+Los enlaces de este práctico están arriba de todo, al principio del documento.
+
+### Build once, deploy many: qué problema resuelve
+
+El escenario del enunciado es QA y PROD comportándose distinto con "el mismo código", porque el
+proveedor reconstruye la app en vez de ejecutar la imagen verificada. Entre la verificación y el
+deploy hay un `npm install` nuevo, y una dependencia transitiva puede resolver distinto. El código
+es el mismo; el binario no.
+
+En mi caso ese hueco ya estaba cerrado desde el TP6: mis dos compose usan `image:` con el tag
+`sha-<commit>` y **ninguno** tiene `build:`. El pipeline le pasa `IMAGE_TAG` y compose hace `pull`.
+Lo que corre en QA es, bit a bit, lo que el pipeline construyó, testeó y publicó.
+
+Y eso es exactamente lo que vuelve útiles a las dos suites de este TP. Si QA ejecutara una
+reconstrucción, mis e2e estarían verificando *otra* construcción del mismo código, y aprobar la
+promoción en base a ellas sería una apuesta.
+
+**El `:?` no es un detalle.** Los compose piden `${IMAGE_TAG:?falta IMAGE_TAG}`: si la variable no
+está, compose se niega con ese mensaje en vez de inventar una etiqueta. Un deploy que no puede decir
+**qué** despliega no debería ocurrir.
+
+### La estrategia de etiquetas, y por qué saqué `latest`
+
+Son dos etiquetas con dos trabajos distintos:
+
+| | Qué garantiza |
+|---|---|
+| `sha-<commit>` en el registry | **inmutable**: apunta a un binario y nunca se mueve |
+| `v7.0.0` en git | **nombre humano**: marca qué commit cerró el práctico |
+
+Hasta el TP6 mi pipeline publicaba las dos: `sha-<commit>` y `latest`. **En este TP saqué `latest`**,
+y el motivo es el mismo que ordena todo el práctico: `latest` se mueve. Hoy apunta a una imagen y
+mañana a otra, así que un entorno que pidiera `latest` no podría decir qué está corriendo, y dos
+deploys con el texto idéntico darían resultados distintos. Dejé la etiqueta vieja sin borrar en el
+registry a propósito, para poder mostrar en la defensa que quedó congelada en el último commit que la
+publicó y que ya no la sigue nadie.
+
+Mi fallback local tiene una ventaja acá: **no configuro ninguna imagen a mano**. No hay un panel
+donde elegí una imagen al crear el servicio; el único lugar donde se decide qué corre es el
+`IMAGE_TAG` que el job le pasa a compose. En el riel de Render hay que distinguir entre la imagen con
+la que se creó el servicio y la que el hook le mandó después; acá esa diferencia no existe, y se
+comprueba con `docker ps`.
+
+### Del tag a la imagen, en un paso
+
+    git rev-list -n1 v7.0.0        # → el commit
+    # y esa misma etiqueta sha-<commit> está en los dos paquetes
+
+El tag de git no guarda binarios: guarda un commit. El puente es la convención `sha-<commit>`, que
+convierte un nombre de versión en una dirección del registry sin tener que buscar en ningún lado.
+
+### Cómo se comprueba, desde afuera, que el entorno EJECUTA mi imagen
+
+Tres cosas, y ninguna necesita que me crean:
+
+1. `docker ps` muestra el nombre completo de la imagen que cada contenedor está corriendo, con su
+   `sha-<commit>`. No es lo que *pedí*: es lo que *está*.
+2. `GET /health` devuelve el commit, porque `APP_COMMIT` entra por variable desde el mismo
+   `IMAGE_TAG`.
+3. El log del job muestra el `pull` bajando ese tag, y en el registry el paquete tiene esa etiqueta.
+
+**Lo que el smoke no alcanza a probar.** El smoke pregunta *"¿responde?"*. Si un deploy fallara en
+silencio y quedara la versión anterior arriba, contestaría 200 igual. Por eso `/health` devuelve el
+commit: es lo que convierte "responde" en "responde **esto**". Y aun así sigue sin decir si la app
+**funciona** — para eso están las dos suites de este TP.
+
+### Qué puse en cada suite, y qué dejé afuera
+
+**Integración (3, contra la api de QA, sin navegador):** alta + verificación + borrado; título vacío
+rechazado con 400; y **la tercera, que elegí yo: buscar un título con un paréntesis sin cerrar**.
+
+Elegí ésa porque es un bug que ya me pasó. Antes del TP5 el texto del usuario entraba crudo a
+`new RegExp()`, así que buscar `(` hacía lanzar la expresión y la api contestaba 500: **la búsqueda
+entera se caía por un carácter**. El unitario del TP5 afirma que `escaparRegex` devuelve la cadena
+escapada. Ésta afirma lo que aquel no puede: que **Mongo acepta ese filtro y devuelve el documento**.
+Una cosa es escribir bien la expresión; otra es que el motor que la ejecuta esté de acuerdo. Si se
+rompe, me escribe cualquiera que haya puesto un paréntesis en un título.
+
+**e2e (3, con navegador, contra el front de QA):** alta; título demasiado largo con el error en
+pantalla; y **la tercera, mía: buscar por título**. Buscar es lo que el usuario hace todos los días,
+y toca la base — que es el desempate que recomienda el enunciado cuando dudás entre dos flujos.
+
+**Qué NO puse, y por qué.** En e2e no puse validaciones de reglas: que un título de 2 caracteres falle
+y uno de 3 pase ya está cubierto por los unitarios del TP5, en milisegundos y sin navegador. Repetir
+eso arriba cuesta minutos y no agrega información. En integración no puse nada de pantalla: esa suite
+no sabe que el front existe, a propósito — si supiera, dejaría de poder decirme *quién* se rompió.
+
+### Qué prueba cada una, y por qué no es lo mismo
+
+Es el punto del práctico, y lo cobré con mi propia rotura. Cambié **una palabra** en
+`AddTutorial.js`: el front pasó a mandar el título en un campo llamado `titulo` en vez de `title`.
+No toqué la api, no toqué `e2e/`, y no toqué ningún test.
+
+Resultado de esa corrida:
+
+| | |
+|---|---|
+| Smoke de QA | 🟢 verde — el sistema respondía |
+| Integración | 🟢 **verde** — 3 de 3, en 496 ms |
+| e2e | 🔴 **roja** — 3 de 3 fallados, cero salteados |
+| `deploy-prod` | **nunca arrancó** — ni llegó a pedir aprobación |
+
+Y eso no es sólo "algo se rompió": es la cadena diciéndome **quién**. A la api le hablé directo, con
+el nombre correcto del campo, y su base guardó y borró sin chistar — la api y la base están sanas. El
+que no usa bien la api es el front. **Lo diagnostiqué sin abrir el código**, bajando los dos reportes de la
+corrida. En la traza del fallo, pestaña *Network*, el `POST` del alta dice todo:
+
+    lo que el navegador mando:  {"titulo":"e2e busqueda 1790974564243", ...}
+    lo que la api contesto:     400  {"message":"El titulo es obligatorio"}
+
+Si en cambio hubiera roto la api, la integración se habría puesto roja y **la e2e ni habría
+corrido** — su `needs` no se cumple. También es información, y es a propósito: no se gasta un
+navegador en confirmar algo que ya sabemos.
+
+Lo que el smoke verde agrega a la historia: el sistema respondía y **aun así estaba roto**. Un `curl`
+más no lo habría atajado, porque el smoke sólo ve lo que se me ocurrió preguntarle.
+
+### Por qué mi integración es la amplia
+
+Hay dos formas de escribir esto. La **estrecha** arma la api dentro del propio pipeline contra una
+base descartable; la **amplia**, que es la que usé, le habla a la api **ya desplegada** en QA.
+
+Lo que gana la amplia: prueba además que **el despliegue quedó bien** —la imagen, las variables, la
+conexión a la base, la red— y no me obliga a levantar una base en el job. Con QA ya corriendo la
+imagen exacta de esta corrida, es el mismo concepto con un décimo de la configuración.
+
+Lo que pierde: llega **después** del deploy, así que no puede frenar nada antes de que QA tenga el
+cambio; es más lenta; y depende de que QA esté sano, así que un problema de entorno se ve igual que
+un problema de código.
+
+### Cold start, flaky, y por qué no hay un solo `sleep`
+
+Un test **flaky** es el que a veces pasa y a veces no sin que el código cambie. Es peor que no tener
+test: entrena al equipo a mirar un rojo y decir *"dale de nuevo"* — y el día que el rojo es de verdad,
+también lo re-corren.
+
+Lo que hice para no fabricarlos:
+
+- **Esperas explícitas, no `sleep`.** Playwright espera solo a que el elemento aparezca. Un `sleep`
+  fijo es la forma más común de fabricar un flaky: o es demasiado corto y falla, o demasiado largo y
+  la suite tarda el doble.
+- **Tiempos largos a propósito**: 60 s por test y 15 s por afirmación, en vez de los 5 s de fábrica.
+- **Un reintento.** Absorbe una demora suelta, pero si falla las dos veces queda rojo. Lo importante:
+  un test que pasa recién en el reintento sale marcado **flaky** en el reporte aunque la corrida esté
+  verde. Por eso abro el reporte también cuando está en verde.
+- **Un solo worker**, porque QA es un entorno con una base compartida por las dos suites.
+- **Cero `test.skip`.** Ninguna prueba se saltea sola si el entorno no responde: eso sería un verde
+  que no probó nada.
+
+Mis entornos son locales, así que no tengo el cold start del plan gratis. Igual dejé la configuración
+preparada, porque el día que esto corra contra una nube que duerme es exactamente lo que hace falta —
+y porque el orden de la cadena ya ayuda: el smoke y la integración despiertan QA antes de que entre el
+navegador.
+
+### La misma imagen del front en QA y en PROD
+
+Adentro de la imagen quedan los estáticos de React, y `REACT_APP_API_URL=/api` **relativa**: el
+bundle no sabe la dirección de ninguna api, le pega a su propio origen.
+
+Por variable queda `BACKEND_URL`, que nginx sustituye en su plantilla **al arrancar el contenedor**,
+no al construirlo. Por eso el mismo binario sirve en los dos entornos: cada uno levanta con su
+variable y habla con su propio backend. Si la dirección se horneara en el build, harían falta dos
+imágenes — y entonces lo que probé en QA no sería lo que corre en PROD.
+
+### Límite conocido: QA es uno solo
+
+Con dos merges seguidos, la corrida B puede redesplegar QA mientras las suites de A lo están usando.
+Lo que veo: un rojo que no es de mi código, o algo peor, un verde que en parte probó la imagen de B.
+Cómo lo reconozco: miro con `docker ps` qué imagen está corriendo y a qué hora corrió el `deploy-qa`
+de B. Qué hago: la corrida A se rechaza con el motivo, y la que vale es la B, que trae los dos
+cambios. **Mi regla es un merge por vez** mientras la cadena corre.
+
+El `concurrency` no lo resuelve: cancela lo que está en cola, y un job esperando aprobación no está en
+cola. Un equipo real levanta un entorno por corrida, que nace y muere con ella. Eso queda fuera de
+este práctico.
+
+### Problemas que me aparecieron
+
+**Las e2e no tenían qué mirar.** Los dos primeros flujos no se podían escribir contra mi app: el
+error de la api se iba a `console.log`, así que un alta rechazada no cambiaba nada en pantalla, y la
+lista sólo sabía borrar **todo**, así que una prueba no podía sacar su dato sin llevarse los demás.
+Agregué un `role="alert"` con el mensaje que escribe la regla del backend, y un botón de borrar por
+fila con `aria-label="Borrar <título>"`. No fue esquivar un límite de Playwright: el test me señaló
+un problema de accesibilidad real de mi app. El buscador tampoco tenía etiqueta — le puse una.
+
+**Playwright pide Node 20 y la imagen del front se construye con Node 16.** `react-scripts 4` no
+compila con OpenSSL 3, así que esa etapa quedó en Node 16 desde el TP2. Lo resolví sacando a
+Playwright del build: `npm install --omit=dev`. Es lo correcto por otro motivo además del técnico —
+las dos suites **no corren adentro de la imagen**, corren contra el entorno ya desplegado, así que no
+tienen por qué viajar en ella.
+
+**El runner se quedó bajando Node y la corrida murió por timeout.** El primer intento de la corrida
+roja no llegó a correr un solo test: `actions/setup-node` se puso a bajar Node y un caché de npm de
+**1,2 GB a 0,5 MB/s** por mi conexión, y el `timeout-minutes: 15` cortó el job a los 16 minutos.
+Lo saqué de los dos jobs: en un runner que es mi propia máquina, bajar Node en cada corrida es tiempo
+regalado, porque ya tiene Node 20. En su lugar hay un paso que deja la versión escrita en el log y
+corta temprano con un mensaje claro si algún día le cambio el Node a la máquina.
+
+Lo que me dejó el incidente: **el timeout hizo su trabajo**. Sin él, el runner se quedaba ocupado con
+una descarga colgada y la cadena entera trabada — el mismo síntoma que el keychain del TP6, que se
+colgaba sin fallar nunca. Un job sin tope de tiempo no es un job más paciente: es un job que no sabe
+rendirse.
+
+**Y una que no era del pipeline: la caché del navegador.** Después de desplegar el arreglo, el alta
+me seguía dando *"El titulo es obligatorio"* en el navegador, con QA ya corriendo la imagen buena.
+No era el deploy: el bundle que QA servía tenía el código arreglado (lo comprobé pidiéndole el `.js`
+con `curl` y buscando el nombre del campo), y el `POST` por el proxy del front contestaba 200. Lo que
+estaba viejo era **mi navegador**: el nombre del bundle cambia en cada build para que el navegador
+baje el nuevo, pero el `index.html` que lo referencia se cachea igual. Se arregla con una recarga
+forzada, y lo anoto porque es el tipo de falso rojo que te hace dudar del deploy cuando el deploy
+está bien — y porque las e2e **no lo sufren**: cada corrida de Playwright abre un contexto limpio,
+sin caché. Ése es otro motivo para creerle más a la suite que a mi propia pantalla.
+
+**Los dos mundos de tests podían chocar.** El runner de unitarios y el de Playwright matchean patrones
+parecidos de nombres de archivo. Con Vite hay que excluir `e2e/` a mano; verifiqué que con
+create-react-app no hace falta, porque su jest sólo mira `src/`. Igual puse `e2e/` en el
+`.dockerignore`, para que no entre en el contexto del build.
+
+### Declaración de uso de IA
+
+Usé Claude como ayuda durante el TP7. Me ayudó a entender y resolver los problemas que me
+aparecieron, como las e2e que no tenían qué mirar en pantalla, el conflicto de versiones de Node
+entre Playwright y la imagen del front, y el job que se colgaba bajando Node hasta que lo cortó el
+timeout. Las decisiones del trabajo fueron mías: qué tests incluir en cada suite, la integración
+amplia, sacar latest y la regla de un merge por vez. Los resultados los verifiqué yo con los
+reportes de las corridas.

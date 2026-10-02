@@ -83,6 +83,36 @@ Imágenes publicadas (públicas):
 - `ghcr.io/josedlpena3/tienda-tp2-backend:v0.1.0`
 - `ghcr.io/josedlpena3/tienda-tp2-frontend:v0.1.0`
 
+## Pruebas
+
+Tres capas, y cada una ve algo que las otras no:
+
+| Capa | Dónde vive | Contra qué corre | Tarda |
+|---|---|---|---|
+| Unitarias | `backend/app/**/*.test.js` · `frontend/src/lib/*.test.js` | la unidad sola, con dobles | milisegundos |
+| Integración | `frontend/e2e/api.spec.js` | la **api de QA** desplegada, con su Mongo de verdad | segundos |
+| e2e | `frontend/e2e/tutoriales.spec.js` | el **front de QA**, con un navegador real | minutos |
+
+Las unitarias corren adentro de la etapa `test` del Dockerfile, en el pipeline. Las otras dos corren
+contra el entorno ya desplegado, así que primero tiene que estar arriba.
+
+```bash
+cd frontend
+npm ci
+npx playwright install chromium
+
+API_BASE_URL=http://localhost:8080 npm run test:integracion
+E2E_BASE_URL=http://localhost:3000 npm run test:e2e
+
+npx playwright show-report        # el reporte de la última corrida
+```
+
+`API_BASE_URL` es la **api**; `E2E_BASE_URL` es el **front**. Son dos servicios con dos direcciones:
+si le pasás la del front a la integración, los pedidos dan 404.
+
+En el pipeline las dos se encadenan como gate: `deploy-qa → integracion → e2e → deploy-prod`. Si
+cualquiera de las dos se pone roja, producción ni llega a pedir aprobación.
+
 ## Apagar
 
 ```bash
