@@ -23,7 +23,7 @@ const AddTutorial = () => {
 
   const saveTutorial = () => {
     var data = {
-      title: tutorial.title,
+      titulo: tutorial.title,
       description: tutorial.description
     };
 
