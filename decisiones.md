@@ -858,3 +858,113 @@ entre Playwright y la imagen del front, y el job que se colgaba bajando Node has
 timeout. Las decisiones del trabajo fueron mías: qué tests incluir en cada suite, la integración
 amplia, sacar latest y la regla de un merge por vez. Los resultados los verifiqué yo con los
 reportes de las corridas.
+
+---
+
+## TP8 — Infraestructura como Código
+
+Este práctico no deja enlaces afuera del repo: la prueba no es un texto ni una captura, es
+preprod naciendo en vivo. Lo que queda acá es la carpeta `infra/` y la release `v8.0.0`.
+
+### Qué riel elegí y qué versiones fijé
+
+Fui por el **plan C**: Terraform con el provider de Docker, 100 % local. No fue una salida de
+emergencia — es el riel que corresponde, porque mis QA y PROD ya corren así desde el TP6, sobre
+mi propio runner. El enunciado lo declara entrega válida sin descuento.
+
+| | |
+|---|---|
+| Terraform | `>= 1.5` declarado · corrí **1.16.5** |
+| Provider | `kreuzwerker/docker ~> 4.0` · resolvió **4.6.0** |
+| Lock | `.terraform.lock.hcl` versionado, con los hashes de los binarios |
+
+Fijar la versión es lo que hace que esto siga sirviendo en marzo para el Integrador: sin el
+constraint, un `init` de dentro de cuatro meses podría bajar un provider con otro comportamiento y
+el mismo código dejaría de reproducir el mismo entorno.
+
+**preprod es un entorno nuevo, no una migración.** No importé QA ni PROD ni les cambié nada:
+`terraform state list` tiene ocho recursos y todos son míos. Declarar el que ya existía habría
+significado ponerle a Terraform la responsabilidad de dos entornos que el pipeline ya gobierna
+bien — y el primer `plan` mal leído se los lleva.
+
+**Lo que se deriva en vez de copiarse.** La cadena de conexión a Mongo sale del nombre real del
+contenedor de la base, y la dirección del backend que usa el front sale del nombre real de la api:
+
+    "MONGO_URL=mongodb://…@${docker_container.db.name}:27017/…"
+    "BACKEND_URL=http://${docker_container.api.name}:8080"
+
+Si mañana le cambio el prefijo `preprod`, las dos lo siguen solas. Copiarlas sería volver a tener
+dos verdades que hay que acordarse de sincronizar — que es justamente el README desactualizado del
+escenario.
+
+**Dónde vive el estado, y por qué no en el repo.** En `$HOME/tfstate/`, fuera del workspace. Hay un
+motivo técnico además del obvio: `actions/checkout` corre `git clean -ffdx` antes de cada checkout,
+y la bandera `-x` borra **también** los archivos ignorados por git. Un estado en
+`infra/terraform.tfstate` —justamente porque está en el `.gitignore`— se borraría en cada corrida
+del runner, y el plan diría "crear todo" para siempre.
+
+Y el motivo obvio, que comprobé en vez de suponerlo: **marqué la contraseña como `sensitive` y el
+plan la oculta** (`env = (sensitive value)`), **pero el estado la guarda en texto plano**. La busqué
+adentro y aparece dos veces. `sensitive` protege los logs, no el archivo.
+
+### Qué problemas tuve y cómo los resolví
+
+**El `destroy` salía con código 1, y me habría explotado en la defensa.** El provider intentaba
+borrar las imágenes locales y Docker se negaba:
+
+    conflict: unable to delete mongo:7 (must be forced)
+      - container a5f69ea89c2b is using its referenced image
+
+Ese contenedor es de QA. Los tres entornos corren la **misma** imagen del TP7, así que cuando
+preprod se destruye y quiere borrarla, los otros dos la tienen tomada.
+
+Lo resolví con `keep_locally = true` en las tres imágenes, y el arreglo es conceptual: **la imagen
+no es de preprod**. La construyó y publicó el pipeline del TP7; preprod la *usa*, no la *posee*.
+Destruir un entorno no puede llevarse algo que no le pertenece. Después: `Destroy complete!
+Resources: 8 destroyed`, exit code 0.
+
+**Un drift que Terraform no puede ver.** Desconecté la api de su red a mano. La app quedó muerta
+—`/health` sin respuesta, el contenedor sin ninguna red— y `terraform plan` siguió diciendo
+**"No changes"**. Probé con el provider 3.9.0 y con el 4.6.0: en los dos, el refresh no vuelve a
+leer `networks_advanced`, así que ese cambio es invisible.
+
+Lo reparé con `terraform apply -replace=docker_container.api`, que es la herramienta correcta
+cuando el provider no puede detectar algo: se lo digo yo. Y la lección es la que el propio
+enunciado anticipa —el drift real y el drift visible no siempre coinciden— sólo que en mi caso no
+coinciden del todo: no vi un `~` ni un replace automático, vi silencio.
+
+**`depends_on` no espera que Mongo esté lista.** Espera que el contenedor de la base se **cree**.
+Es el "arrancó ≠ está listo" del TP2, que Compose resolvía con `healthcheck` + `service_healthy`.
+Mi backend hace `process.exit()` si no puede conectar, así que la api se moría una vez y quedaba
+muerta. Lo resolví con `restart = "unless-stopped"`: Docker la reintenta hasta que Mongo contesta.
+Tarda unos tres segundos.
+
+**Terraform ya no está en Homebrew core.** HashiCorp le cambió la licencia y lo sacaron de las
+fórmulas principales. Lo instalé desde el tap oficial: `brew tap hashicorp/tap` y después
+`brew install hashicorp/tap/terraform`.
+
+### Los dos huecos de mi riel, que conviene que yo nombre antes que me los pregunten
+
+Correr todo local me deja dos cosas afuera. **Nunca vi un plan que diga "voy a destruir tu base de
+datos gestionada"** contra un proveedor de verdad — mi destroy se lleva un contenedor, no un
+recurso que le cuesta plata a alguien. Y **no tengo la presión de la cuota**: en la nube el free
+tier te suspende producción si te pasás de las horas, y eso convierte al `destroy` en una
+necesidad; acá es un ejercicio que hago porque entiendo para qué sirve.
+
+También tengo un accidente favorable: como mi runner **es** mi máquina, un plan corrido desde el
+pipeline leería **mi** estado, así que sería un diff de verdad y no el "crearía todo" que ve quien
+corre en la nube. Deja de ser cierto apenas aparezca una segunda máquina — que es, otra vez, el
+argumento del estado compartido.
+
+**Qué sigue siendo artesanal en mi cuenta:** QA y PROD. Están en dos archivos de Compose que yo
+edito a mano, sin estado, sin plan y sin nadie que detecte si alguien les cambia algo. preprod es
+el único entorno del que puedo decir qué tiene sin mirarlo.
+
+### Declaración de uso de IA
+
+Usé Claude como ayuda durante el TP8. Me ayudó a entender y resolver los problemas que me
+aparecieron, como el destroy que fallaba porque las imágenes las usaban QA y PROD, el drift de red
+que terraform plan no detectaba y la api que se moría porque Mongo todavía no estaba lista. Las
+decisiones del trabajo fueron mías: ir por el plan C con Terraform y Docker local, fijar las
+versiones, guardar el estado fuera del repo y crear preprod como entorno nuevo sin tocar QA ni
+PROD. Los resultados los comprobé yo corriendo plan, apply y destroy.

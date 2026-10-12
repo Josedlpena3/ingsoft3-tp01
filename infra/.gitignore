@@ -1,0 +1,22 @@
+# Este archivo existe ANTES del primer apply, y no es prolijidad: si el estado
+# o las variables se escapan al repositorio, se escapan con todo adentro.
+
+# El estado. Guarda los valores REALES de lo que se creo, incluidas las
+# contraseñas en texto plano, aunque la variable este marcada sensitive.
+# Ademas vive fuera del workspace (ver el backend en main.tf), asi que estas
+# lineas son la segunda red, no la primera.
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.lock.info
+
+# Los plugins que baja `terraform init`. Son binarios de cientos de MB y se
+# vuelven a bajar solos; lo que SI se versiona es el .terraform.lock.hcl, que
+# fija los hashes.
+.terraform/
+
+# Los valores de las variables: aca vive la contraseña de la base.
+*.tfvars
+*.tfvars.json
+
+# Planes guardados en archivo: un plan tambien contiene los valores.
+*.tfplan
