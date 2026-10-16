@@ -1,0 +1,30 @@
+# Dependabot vigila las dependencias de los tres ecosistemas que tiene este
+# repo. Lee esta configuracion desde la rama default del remoto: un archivo
+# local no hace nada.
+#
+# El argumento es el de shift-left del TP5 y el TP7, un escalon mas afuera: la
+# mayor parte del codigo que corre en produccion no lo escribi yo, lo
+# escribieron las dependencias. Si nadie las mira, envejecen solas.
+
+version: 2
+updates:
+  # El backend: Express, Mongoose y jest.
+  - package-ecosystem: "npm"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # El frontend: React, axios, react-scripts y Playwright.
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # Las actions del pipeline TAMBIEN son dependencias: checkout, setup-node,
+  # build-push-action y upload-artifact corren con permisos sobre mi repo.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
