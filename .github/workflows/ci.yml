@@ -21,7 +21,7 @@ jobs:
         run: echo "Rama $RAMA · commit $GITHUB_SHA"
 
       - name: Bajar el código al runner
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Preparar el constructor que sabe cachear
         uses: docker/setup-buildx-action@v4
@@ -102,7 +102,7 @@ jobs:
         run: echo "Rama $RAMA · commit $GITHUB_SHA"
 
       - name: Bajar el código al runner
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Preparar el constructor que sabe cachear
         uses: docker/setup-buildx-action@v4
@@ -187,7 +187,7 @@ jobs:
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
     steps:
       - name: Bajar el codigo al runner
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Levantar QA
         shell: bash
@@ -233,7 +233,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Bajar el codigo al runner
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # Sin actions/setup-node a proposito. Este runner es mi propia maquina y ya
       # tiene Node 20: la accion se ponia a bajar Node y un cache de npm de
@@ -310,7 +310,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Bajar el codigo al runner
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # Sin actions/setup-node a proposito. Este runner es mi propia maquina y ya
       # tiene Node 20: la accion se ponia a bajar Node y un cache de npm de
@@ -399,7 +399,7 @@ jobs:
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
     steps:
       - name: Bajar el codigo al runner
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Levantar PROD
         shell: bash
