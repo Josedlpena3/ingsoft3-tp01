@@ -49,19 +49,24 @@ app.get("/health", (req, res) => {
 
 require("./app/routes/turorial.routes")(app);
 
-// TEMPORAL — TP9 §3.5. Un endpoint que falla a proposito, para ver un error
-// llegar a Sentry. SE SACA al cerrar el practico.
-app.get("/api/falla", (req, res) => {
-  throw new Error("Falla de prueba del TP9");
-});
+// Aca vivio /api/falla, el endpoint que lanzaba a proposito para ver un error
+// llegar a Sentry (TP9 §3.5). Se saca al cerrar el practico, como corresponde:
+// un endpoint que revienta no tiene nada que hacer en produccion.
+//
+// Sentry gratuito guarda 30 dias. Si para la defensa hiciera falta regenerar
+// el error, vuelve por un PR con estas cuatro lineas y se saca despues:
+//
+//   app.get("/api/falla", (req, res) => {
+//     throw new Error("Falla de prueba del TP9");
+//   });
 
 // Despues de TODAS las rutas y antes de cualquier otro middleware de error:
 // captura lo que se escapa de un handler y lo manda a Sentry.
 //
 // Ojo con lo que NO ve: mis controllers atrapan sus propios errores y
-// contestan 500 a mano, asi que nunca llegan hasta aca. El unico error que
-// Sentry ve hoy es el de arriba. Para que viera los otros habria que dejarlos
-// propagar, o llamar a Sentry.captureException en cada catch.
+// contestan 500 a mano, asi que nunca llegan hasta aca. Para que Sentry los
+// viera habria que dejarlos propagar, o llamar a Sentry.captureException en
+// cada catch. Es el primer arreglo si esto fuera en serio.
 Sentry.setupExpressErrorHandler(app);
 
 // set port, listen for requests

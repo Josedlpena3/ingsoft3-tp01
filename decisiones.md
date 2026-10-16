@@ -968,3 +968,130 @@ que terraform plan no detectaba y la api que se moría porque Mongo todavía no 
 decisiones del trabajo fueron mías: ir por el plan C con Terraform y Docker local, fijar las
 versiones, guardar el estado fuera del repo y crear preprod como entorno nuevo sin tocar QA ni
 PROD. Los resultados los comprobé yo corriendo plan, apply y destroy.
+
+---
+
+## TP9 — DevSecOps + Observabilidad
+
+Este práctico tampoco deja enlaces afuera del repo: lo que se evalúa se ve navegando la pestaña
+*Security*, mis pull requests y el historial del monitor.
+
+### El PR de Dependabot que mergeé, y por qué me animé
+
+Dependabot abrió seis de entrada. Mergeé el de **`actions/upload-artifact`, de la v4 a la v7** —tres
+mayores de golpe—, que es la acción que publica los reportes de cobertura del TP5 y los dos reportes
+de Playwright del TP7.
+
+Me animé por una razón concreta, y no es «porque estaba en verde»: **ese paso corre en cada pull
+request**. Está adentro de `build-backend` y `build-frontend`, sin ningún `if: main` delante, así que
+el check verde **ejercitó la versión nueva de verdad**. Y el radio de daño es chico: si la v7 se
+portara distinto, lo peor que pasa es que no se publique un reporte. No toca la app, ni la imagen que
+se despliega, ni la base.
+
+**Y los que NO mergeé, que es la parte que me costó más pensar.** Dependabot también propuso
+`mongoose` 6 → 9 y `express` 4 → 5, los dos con el pipeline en verde. No los mergeé, porque ese verde
+no prueba lo que parece:
+
+- mis unitarios del TP5 le pasan un **doble** al repositorio —ésa fue la decisión de aquel práctico,
+  inyectar el repo como parámetro— así que **ninguno de los 40 toca Mongoose**;
+- ninguno levanta el servidor, así que tampoco ejercitan a Express;
+- y lo que sí los ejercitaría —la suite de **integración** del TP7, que le habla a la api de QA con
+  su Mongo de verdad— **sale salteada en un pull request**: tiene `if: main`.
+
+O sea que esos dos PRs pueden estar rotos de punta a punta y el verde no se entera. Dejé el
+razonamiento escrito como comentario en cada uno.
+
+### Qué me dice Sentry que el monitor no puede decirme
+
+El monitor contesta una sola pregunta: **¿está viva?**. Sentry contesta las otras tres.
+
+| | Mi dato |
+|---|---|
+| Operación más usada | `GET /api/tutorials` — 147,56 ms de tiempo total, lejos la que más |
+| Operación más lenta (P95) | `POST /api/tutorials` — **32,09 ms**, casi 6× el `DELETE` |
+| Consulta más cara a la base | `save`, 4,93 ms |
+| Errores | la falla de prueba, con 100% de failure rate |
+
+El alta es la más lenta **porque es la única que escribe**: su `save` a Mongo es la consulta más
+cara de las tres que aparecen. No lo adiviné leyendo el código — lo leí de la tabla, y recién
+después fui a ver por qué.
+
+Y un dato sobre mi montaje más que sobre mi app: **todo está en milisegundos**. El ejemplo de la
+cátedra medía 1,4 segundos en la misma operación, porque su base gratuita se duerme. Mis entornos
+son locales: no hay red en el medio, ni cold start. Si esto corriera en la nube, estos números
+serían otros — y esa diferencia es justo lo que no se ve hasta que se mide.
+
+La distinción que importa: un 200 no quiere decir que ande bien. Una `BACKEND_URL` mal cargada, un
+botón muerto o un campo que el front manda con otro nombre **pasan el smoke y pasan el monitor**. De
+hecho eso último me pasó literal en el TP7, y lo atrapó la e2e, no el monitor.
+
+**Lo que Sentry todavía no ve, y lo sé.** Mis controllers atrapan sus propios errores y contestan 500
+a mano, así que nunca llegan al handler de Sentry: el único error que aparece hoy es el del endpoint
+de prueba. Para ver los otros habría que dejarlos propagar o llamar a `captureException` en cada
+`catch`. No lo hice porque habría tocado todos los controllers, pero es el primer arreglo si esto
+fuera en serio.
+
+### Qué problemas tuve
+
+**El SDK de Sentry no entraba en mi front.** La versión última pide Node ≥ 20.19, y mi frontend se
+construye con **node:16**, porque `react-scripts 4` no compila con OpenSSL 3 — una decisión del TP2
+que todavía manda. Fui bajando mayores hasta la **v8**, que pide ≥ 14.18 y entra en las dos etapas de
+build. Una restricción de hace siete prácticos definiendo qué puedo usar hoy.
+
+**El `deploy-prod` de Sentry quedó encolado sin explicación.** Resultó que una corrida del TP8, del 12
+de octubre, había quedado esperando aprobación cuatro días, y el `concurrency` de `deploy-prod`
+—el mismo que puse en el TP7 para que dos merges no desplegaran a la vez— la tenía reteniendo el
+grupo. Rechacé la vieja y la nueva salió sola. Aprendizaje: un gate humano sin atender no es neutro,
+bloquea la cola.
+
+**El monitor externo contra entornos locales.** Mis QA y PROD corren en mi máquina (fallback local
+desde el TP6), y UptimeRobot es externo: no puede llegar a `localhost`. Hay que publicar el endpoint
+con un túnel. Y acá apareció la decisión que más me importa de este práctico: **un túnel publica un
+origen entero, no una ruta**, así que apuntarlo a mi api dejaba pública toda la API —incluido el
+`DELETE /api/tutorials`, que borra todo y no pide autenticación—. Puse delante un nginx mínimo que
+sólo deja pasar `/health` y devuelve 404 a lo demás. El monitor necesita preguntar «¿estás vivo?», no
+necesita poder borrarme la base.
+
+### Cuánto tardó el monitor en avisarme
+
+Provoqué la caída parando la api de PROD y dejando viva la base y el front — a propósito, porque así
+el sitio **seguía cargando** y sólo fallaba la lista. Si el monitor apuntara a la home del front en
+vez de al `/health` de la api, habría estado en verde con la app rota.
+
+| | |
+|---|---|
+| Caída real | 19:51:04 → 19:52:11 · **1 m 07 s** |
+| Lo que reportó el monitor | 19:52:01 → 19:57:06 · **5 m 05 s** |
+| **Tiempo de detección** | **57 segundos** |
+| Retraso en confirmar la vuelta | 4 m 55 s |
+
+**Me avisó en 57 segundos.** Contra las ~31 horas que tardé en enterarme de la caída de verdad del
+15/10 —que no detectó nadie, la vi yo al ir a mirar otra cosa— es casi **2.000 veces más rápido**. Y
+la diferencia no es tecnológica: es que ahora alguien pregunta **desde afuera**.
+
+**Pero el monitor reportó 4,6 veces más caída de la que hubo**, y eso me parece lo más interesante
+del ejercicio. Detectó rápido por suerte —su chequeo cayó justo adentro del minuto que estuvo
+caída— y después tardó casi cinco minutos en darse cuenta de que había vuelto, porque sólo puede
+enterarse en el chequeo siguiente. Mi servicio estaba sano a las 19:52:11 y el monitor lo dio por
+muerto hasta las 19:57:06.
+
+La conclusión: **una alerta no te da la verdad, te da la última vez que alguien miró.** Con un
+intervalo de 5 minutos, mi error puede ser de hasta 5 minutos en cada punta, y una caída más corta
+que el intervalo la puedo perder entera. El intervalo no es un detalle de configuración: es el
+límite de lo que mi sistema puede saber sobre sí mismo.
+
+**Por qué lo pauso al terminar.** En el riel de la nube el motivo es la cuota: un monitor cada 5
+minutos mantiene despierto el servicio gratuito y se come las 750 horas. En mi caso, que es local, el
+motivo es otro y más inmediato: el túnel que publica mi `/health` muere cuando cierro la terminal, y
+un monitor despierto me mandaría falsos `Down` para siempre. En los dos casos la regla es la misma —
+el monitor se prende para el ejercicio y se apaga después.
+
+### Declaración de uso de IA
+
+Usé Claude como ayuda durante el TP9. Me ayudó a entender y resolver los problemas que me
+aparecieron, como el SDK de Sentry que no entraba en el front por la versión de Node, el deploy-prod
+que quedó encolado por una aprobación vieja del TP8 y cómo hacer que el monitor externo llegara a
+mis entornos locales. Las decisiones del trabajo fueron mías: mergear solo el PR de upload-artifact
+y dejar afuera los de mongoose y express, poner un nginx que solo deje pasar /health delante del
+túnel, y pausar el monitor al terminar. Los tiempos de detección y los datos de Sentry los medí y
+los leí yo.
