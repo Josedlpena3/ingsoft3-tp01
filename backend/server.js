@@ -1,3 +1,7 @@
+// PRIMERO que todo, antes de express: el SDK envuelve los modulos cuando se
+// cargan, asi que si express entra antes no hay nada que instrumentar.
+const Sentry = require("./instrument");
+
 const express = require("express");
 const cors = require("cors");
 
@@ -44,6 +48,21 @@ app.get("/health", (req, res) => {
 });
 
 require("./app/routes/turorial.routes")(app);
+
+// TEMPORAL — TP9 §3.5. Un endpoint que falla a proposito, para ver un error
+// llegar a Sentry. SE SACA al cerrar el practico.
+app.get("/api/falla", (req, res) => {
+  throw new Error("Falla de prueba del TP9");
+});
+
+// Despues de TODAS las rutas y antes de cualquier otro middleware de error:
+// captura lo que se escapa de un handler y lo manda a Sentry.
+//
+// Ojo con lo que NO ve: mis controllers atrapan sus propios errores y
+// contestan 500 a mano, asi que nunca llegan hasta aca. El unico error que
+// Sentry ve hoy es el de arriba. Para que viera los otros habria que dejarlos
+// propagar, o llamar a Sentry.captureException en cada catch.
+Sentry.setupExpressErrorHandler(app);
 
 // set port, listen for requests
 const PORT = process.env.PORT || 8080;

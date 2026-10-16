@@ -37,6 +37,12 @@ services:
       PORT: 8080
       APP_COMMIT: ${IMAGE_TAG}
       MONGO_URL: mongodb://${MONGO_ROOT_USERNAME:-appuser}:${DB_PASSWORD}@db:27017/${MONGO_DB_NAME:-bezkoder_db}?authSource=admin
+      # Sentry SOLO en produccion, a proposito. QA no define esta variable, asi
+      # que alla el SDK queda apagado solo y no ensucia los datos con errores
+      # de prueba. El DSN no es un secreto: solo sirve para MANDAR datos, no
+      # para leerlos.
+      SENTRY_DSN: https://0ec20c7ced3d3574c7503ce0e00d7169@o4512267868307456.ingest.us.sentry.io/4512267894456320
+      SENTRY_ENV: production
     ports:
       # Publicado para que el smoke test pueda pegarle directo.
       - "8081:8080"
