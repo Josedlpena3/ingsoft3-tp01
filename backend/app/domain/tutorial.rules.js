@@ -87,3 +87,19 @@ function etiquetaDeAvance(avance) {
 
 module.exports.resumirColeccion = resumirColeccion;
 module.exports.etiquetaDeAvance = etiquetaDeAvance;
+
+// Regla 7 — orden alfabetico de la lista, ignorando mayusculas y acentos.
+function ordenarPorTitulo(tutoriales, descendente = false) {
+  if (!Array.isArray(tutoriales)) return [];
+  const copia = [...tutoriales];
+  copia.sort((a, b) => {
+    const ta = String((a && a.title) || "").toLocaleLowerCase("es");
+    const tb = String((b && b.title) || "").toLocaleLowerCase("es");
+    if (ta < tb) return descendente ? 1 : -1;
+    if (ta > tb) return descendente ? -1 : 1;
+    return 0;
+  });
+  return copia;
+}
+
+module.exports.ordenarPorTitulo = ordenarPorTitulo;
