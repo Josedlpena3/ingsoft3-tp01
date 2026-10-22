@@ -533,6 +533,29 @@ viene a consolidar y en el fallback local sale gratis.
 Lo que pierdo por el fallback local: URLs públicas, entornos ajenos a mi máquina, y cold start real.
 Mis dos entornos son dos proyectos de Compose en mi notebook, y si la apago no existen.
 
+### Por qué fui por el fallback local
+
+El enunciado del TP6 contempla este camino en su §3.6 y lo declara entrega válida, sin descuento. Lo
+elegí por tres razones.
+
+**No quise que mi entrega dependiera de un free tier.** Render suspende **todos** los servicios si se
+pasan de las 750 horas que comparten entre sí, y los gratuitos se duermen a los 15 minutos sin
+tráfico. Eso significa que el día de la defensa mi producción podía estar dormida, o directamente
+suspendida por algo que hice tres semanas antes.
+
+**Ya tenía la mitad del camino hecho.** Desde el TP2 tengo la aplicación corriendo con Compose, con
+sus volúmenes y su red. Levantar un segundo y un tercer entorno fue copiar un archivo y cambiarle los
+puertos, no aprender una plataforma nueva.
+
+**Y me dio gratis algo que el riel de la nube pierde.** Render **reconstruye** la aplicación para
+desplegarla, así que lo que corre no es exactamente lo que se verificó. Mis compose usan `image:` con
+el tag `sha-<commit>`: despliego el binario exacto que el pipeline probó. Esa garantía es la que el
+TP7 viene a construir, y en mi caso vino desde acá.
+
+**Lo que pierdo, y lo asumo:** no tengo URLs públicas, mis entornos no existen si apago la máquina, y
+nunca vi un cold start de verdad. Por eso para el monitor del TP9 tuve que publicar el `/health` con
+un túnel, y por eso aviso el fallback antes de la defensa.
+
 ### Qué quedó por variable y qué quedó adentro de la imagen
 
 **Por variable** (se resuelven al arrancar): `BACKEND_URL`, que nginx sustituye en su plantilla; la
