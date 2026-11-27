@@ -49,17 +49,20 @@ app.get("/health", (req, res) => {
 
 require("./app/routes/turorial.routes")(app);
 
-// TEMPORAL — vuelve solo para regenerar la evidencia de Sentry antes del final.
-// Sentry gratuito guarda 30 dias y el error del TP9 (16/10) ya vencio, asi que
-// el endpoint que lanza a proposito (TP9 §3.5) vuelve por este PR, se dispara
-// una vez contra PROD, y se saca por otro PR: un endpoint que revienta no tiene
-// nada que hacer en produccion.
+// Aca vivio /api/falla, el endpoint que lanzaba a proposito para ver un error
+// llegar a Sentry (TP9 §3.5). Se saca apenas la evidencia esta registrada, como
+// corresponde: un endpoint que revienta no tiene nada que hacer en produccion.
 //
-// Tiene que LANZAR, no contestar 500 a mano: el handler de abajo solo captura
-// lo que se escapa de un handler, y los controllers atrapan sus propios errores.
-app.get("/api/falla", (req, res) => {
-  throw new Error("Falla de prueba del TP9");
-});
+// Sentry gratuito guarda 30 dias, asi que vuelve por un PR cada vez que hay que
+// regenerar la evidencia, se dispara una vez contra PROD y se saca por otro PR.
+// Ultima vez: 27/11/2026, para el Integrador.
+//
+// Tiene que LANZAR y no contestar 500 a mano: setupExpressErrorHandler solo
+// captura lo que se escapa de un handler, y los controllers atrapan los suyos.
+//
+//   app.get("/api/falla", (req, res) => {
+//     throw new Error("Falla de prueba del TP9");
+//   });
 
 // Despues de TODAS las rutas y antes de cualquier otro middleware de error:
 // captura lo que se escapa de un handler y lo manda a Sentry.
